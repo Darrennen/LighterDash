@@ -14,9 +14,11 @@ import time
 from typing import Any
 
 from app.config import settings
-from app.db import prune_old, write_history
+from app.db import prune_old, write_history, write_lit_trades
 from app.services.lighter_client import client
 from app.services.store import store
+
+LIT_MARKET_IDS = (120, 2049)  # LIT perp + LIT/USDC spot
 
 log = logging.getLogger("lighter.collector")
 
@@ -159,6 +161,41 @@ async def collect_once() -> dict[str, Any]:
         "new_trades": len(added),
         "with_funding": sum(1 for m in markets if m["funding"] is not None),
     }
+
+
+async def collect_lit_once() -> int:
+    """Fetch up to 100 recent trades for both LIT markets and store new ones."""
+    results = await asyncio.gather(
+        *(client.recent_trades(mid, 100) for mid in LIT_MARKET_IDS),
+        return_exceptions=True,
+    )
+    trades: list[dict[str, Any]] = []
+    for market_id, result in zip(LIT_MARKET_IDS, results):
+        if isinstance(result, Exception):
+            log.debug("LIT recentTrades(%s) failed: %s", market_id, result)
+            continue
+        for raw in result:
+            price = _num(raw.get("price"))
+            size = _num(raw.get("size"))
+            trade_id = raw.get("trade_id")
+            if price <= 0 or size <= 0 or not trade_id:
+                continue
+            is_maker_ask = raw.get("is_maker_ask")
+            taker_is_buyer = bool(is_maker_ask) if isinstance(is_maker_ask, bool) else True
+            ts_raw = raw.get("timestamp", 0)
+            ts_ms = int(float(ts_raw)) if ts_raw else int(time.time() * 1000)
+            trades.append({
+                "trade_id": int(trade_id),
+                "market_id": market_id,
+                "ts": ts_ms,
+                "price": price,
+                "size": size,
+                "usd": price * size,
+                "buyer_id": int(raw.get("bid_account_id") or 0),
+                "seller_id": int(raw.get("ask_account_id") or 0),
+                "taker_is_buyer": 1 if taker_is_buyer else 0,
+            })
+    return await write_lit_trades(trades) if trades else 0
 
 
 async def collector_loop() -> None:

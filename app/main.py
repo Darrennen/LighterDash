@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.routes import api
+from app.routes import api, lit as lit_routes
 
 log = logging.getLogger("lighter")
 logging.basicConfig(
@@ -37,12 +37,18 @@ app.add_middleware(
 )
 
 app.include_router(api.router, prefix="/api", tags=["data"])
+app.include_router(lit_routes.router, prefix="/api/lit", tags=["lit"])
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
 @app.get("/", include_in_schema=False)
 async def index():
     return FileResponse(ROOT / "templates" / "index.html")
+
+
+@app.get("/lit", include_in_schema=False)
+async def lit_page():
+    return FileResponse(ROOT / "templates" / "lit.html")
 
 
 @app.get("/health", tags=["meta"])

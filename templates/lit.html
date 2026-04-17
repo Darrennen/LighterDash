@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LIT · Analyst Cockpit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+<style>
+  .nav-pill{padding:4px 12px;border:1px solid var(--line-2);border-radius:3px;color:var(--ink-dim);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;text-decoration:none;transition:all .15s}
+  .nav-pill:hover{border-color:var(--accent);color:var(--ink)}
+  .acct{font-size:11px;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+  .rank{color:var(--ink-faint);font-size:11px;width:24px}
+  .leaders-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
+  .leaders-grid>*{background:var(--bg)}
+  @media(max-width:900px){.leaders-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <a href="/" class="mark" style="text-decoration:none">lighter</a>
+    <span class="sub">LIT · flow tracker</span>
+  </div>
+  <div class="controls">
+    <span class="mode-label">PERIOD</span>
+    <button class="btn active" data-hours="24">24h</button>
+    <button class="btn" data-hours="168">7d</button>
+    <button class="btn" data-hours="720">30d</button>
+  </div>
+  <div class="controls" style="margin-left:0">
+    <span class="mode-label">REFRESH</span>
+    <button class="btn active" data-refresh="10">10s</button>
+    <button class="btn" data-refresh="30">30s</button>
+    <button class="btn" data-refresh="0">pause</button>
+  </div>
+  <a href="/" class="nav-pill">← overview</a>
+  <div class="status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">connecting…</span>
+    <span style="color:var(--ink-faint);margin-left:12px">last sync <span id="lastSync">—</span></span>
+  </div>
+</header>
+
+<section class="kpis">
+  <div class="kpi">
+    <div class="lbl">LIT Perp</div>
+    <div class="val" id="kpi-perp">—</div>
+    <div class="sub" id="kpi-perp-sub">&nbsp;</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">LIT/USDC Spot</div>
+    <div class="val" id="kpi-spot">—</div>
+    <div class="sub" id="kpi-spot-sub">&nbsp;</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">Buy Volume</div>
+    <div class="val up" id="kpi-buy">—</div>
+    <div class="sub" id="kpi-buy-sub">&nbsp;</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">Sell Volume</div>
+    <div class="val down" id="kpi-sell">—</div>
+    <div class="sub" id="kpi-sell-sub">&nbsp;</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">Net Delta</div>
+    <div class="val" id="kpi-delta">—</div>
+    <div class="sub" id="kpi-delta-sub">&nbsp;</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">Stored Trades</div>
+    <div class="val" id="kpi-stored">—</div>
+    <div class="sub" id="kpi-stored-sub">building history…</div>
+  </div>
+</section>
+
+<section class="grid">
+  <!-- live trades -->
+  <div class="panel">
+    <h2>Live Trades <span class="count" id="tradeCount"></span></h2>
+    <div style="flex:1;overflow:auto;max-height:calc(100vh - 320px)">
+      <table id="litTradesTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Mkt</th>
+            <th>Side</th>
+            <th class="num">Price</th>
+            <th class="num">Size</th>
+            <th class="num">USD</th>
+            <th class="num">Buyer #</th>
+            <th class="num">Seller #</th>
+          </tr>
+        </thead>
+        <tbody id="litTradesBody">
+          <tr><td colspan="8" class="empty">collecting trades…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- right column -->
+  <div>
+    <div class="row">
+      <div class="panel">
+        <h2>Buy / Sell Flow <span class="count" id="flowPeriod"></span></h2>
+        <div style="display:flex;align-items:baseline;gap:20px;margin-bottom:14px">
+          <div>
+            <div class="flow-lbl">Buy</div>
+            <div class="up flow-val" id="flowBuy">—</div>
+          </div>
+          <div>
+            <div class="flow-lbl">Sell</div>
+            <div class="down flow-val" id="flowSell">—</div>
+          </div>
+          <div style="margin-left:auto;text-align:right">
+            <div class="flow-lbl">Delta</div>
+            <div class="flow-val" id="flowDelta">—</div>
+          </div>
+        </div>
+        <div class="flow-bar">
+          <div id="barBuy" style="background:var(--green);width:50%"></div>
+          <div id="barSell" style="background:var(--red);width:50%"></div>
+        </div>
+        <div class="flow-pct"><span id="pctBuy">—</span><span id="pctSell">—</span></div>
+        <div style="margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px">
+          <div>
+            <div class="section-lbl">Trades Recorded</div>
+            <div id="flowTrades" style="font-variant-numeric:tabular-nums">—</div>
+          </div>
+          <div>
+            <div class="section-lbl">Window Coverage</div>
+            <div id="flowCoverage" style="color:var(--ink-dim);font-size:11px">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="panel">
+        <h2>Perp Stats <span class="count">current</span></h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:12px">
+          <div>
+            <div class="section-lbl">Funding 8h</div>
+            <div class="flow-val" id="fundingRate" style="font-size:18px">—</div>
+          </div>
+          <div>
+            <div class="section-lbl">Funding APR</div>
+            <div class="flow-val" id="fundingApr" style="font-size:18px">—</div>
+          </div>
+          <div>
+            <div class="section-lbl">24h Volume</div>
+            <div id="perpVol" style="font-variant-numeric:tabular-nums">—</div>
+          </div>
+          <div>
+            <div class="section-lbl">24h Trades</div>
+            <div id="perpTrades" style="font-variant-numeric:tabular-nums">—</div>
+          </div>
+          <div>
+            <div class="section-lbl">24h High</div>
+            <div id="perpHigh" style="color:var(--green);font-variant-numeric:tabular-nums">—</div>
+          </div>
+          <div>
+            <div class="section-lbl">24h Low</div>
+            <div id="perpLow" style="color:var(--red);font-variant-numeric:tabular-nums">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- leaders tables -->
+<div class="leaders-grid">
+  <div class="panel">
+    <h2>Top Buyers <span class="count" id="buyersPeriod"></span></h2>
+    <table id="buyersTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Account</th>
+          <th class="num">Total USD</th>
+          <th class="num">Trades</th>
+          <th class="num">Avg Trade</th>
+        </tr>
+      </thead>
+      <tbody id="buyersBody">
+        <tr><td colspan="5" class="empty">accumulating data…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Top Sellers <span class="count" id="sellersPeriod"></span></h2>
+    <table id="sellersTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Account</th>
+          <th class="num">Total USD</th>
+          <th class="num">Trades</th>
+          <th class="num">Avg Trade</th>
+        </tr>
+      </thead>
+      <tbody id="sellersBody">
+        <tr><td colspan="5" class="empty">accumulating data…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<footer>
+  <span>backend · <a href="/docs" target="_blank">/docs</a> · <a href="/api/lit/summary" target="_blank">/api/lit/summary</a></span>
+  <span style="color:var(--ink-faint)">·</span>
+  <span id="tickCount">0 polls</span>
+  <div class="spacer"></div>
+  <span>LIT perp #120 · LIT/USDC spot #2049</span>
+</footer>
+
+<script type="module" src="/static/lit.js"></script>
+</body>
+</html>
