@@ -1,16 +1,43 @@
-"""REST endpoints. Frontend polls these on a user-selected interval."""
+"""REST endpoints — each request triggers an on-demand refresh if data is stale."""
 from __future__ import annotations
+
+import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.db import db_stats, fetch_history
+from app.db import db_stats, fetch_history, init_db
+from app.services.collector import collect_once
 from app.services.store import store
 
 router = APIRouter()
+log = logging.getLogger("lighter.api")
+
+_last_collect: float = 0.0
+_db_ready: bool = False
+_CACHE_TTL: float = 5.0
+
+
+async def _maybe_refresh() -> None:
+    global _last_collect, _db_ready
+    if not _db_ready:
+        try:
+            await init_db()
+            _db_ready = True
+        except Exception as e:
+            log.error("init_db failed: %s", e)
+    if time.time() - _last_collect < _CACHE_TTL:
+        return
+    _last_collect = time.time()
+    try:
+        await collect_once()
+    except Exception as e:
+        log.error("on-demand collect failed: %s", e)
 
 
 @router.get("/status")
 async def status():
+    await _maybe_refresh()
     db = await db_stats()
     return {
         "last_sync": store.last_sync,
@@ -24,7 +51,7 @@ async def status():
 
 @router.get("/markets")
 async def markets():
-    """Latest snapshot of all markets with derived summary metrics."""
+    await _maybe_refresh()
     if not store.markets:
         return {"markets": [], "summary": None, "ts": store.last_sync}
 
@@ -58,7 +85,7 @@ async def trades(
     min_usd: float = Query(0, ge=0),
     market_id: int | None = None,
 ):
-    """Recent trades from the in-memory buffer (volatile)."""
+    await _maybe_refresh()
     out = []
     for t in store.trades:
         if t["usd"] < min_usd:
@@ -73,7 +100,7 @@ async def trades(
 
 @router.get("/flow")
 async def flow(limit: int = Query(500, ge=10, le=1000)):
-    """Buy/sell aggressor flow over the last N trades."""
+    await _maybe_refresh()
     buy_usd = sell_usd = 0.0
     per_market: dict[str, dict[str, float]] = {}
     for i, t in enumerate(store.trades):
@@ -117,7 +144,7 @@ async def history(
         "funding", pattern="^(funding|oi_usd|oi_base|last_price)$"
     ),
 ):
-    """Time-series for one market, one metric (funding | oi_usd | oi_base | last_price)."""
+    await _maybe_refresh()
     if market_id not in store.markets_by_id:
         raise HTTPException(404, "unknown market_id")
     data = await fetch_history(market_id, hours=hours, field=field)

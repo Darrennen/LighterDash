@@ -31,8 +31,8 @@ class Settings:
     # Historical snapshot retention (days)
     HISTORY_RETENTION_DAYS: int = int(os.getenv("HISTORY_RETENTION_DAYS", "30"))
 
-    # SQLite path
-    DB_PATH: str = os.getenv("DB_PATH", str(ROOT / "data" / "cockpit.db"))
+    # SQLite path — /tmp is writable on both Vercel (ephemeral) and locally
+    DB_PATH: str = os.getenv("DB_PATH", "/tmp/cockpit.db")
 
     # HTTP client timeout (seconds)
     HTTP_TIMEOUT: float = float(os.getenv("HTTP_TIMEOUT", "10"))
