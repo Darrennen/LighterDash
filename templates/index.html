@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Lighter · Analyst Cockpit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="mark">lighter</span>
+    <span class="sub">analyst cockpit · local</span>
+  </div>
+  <div class="controls">
+    <span class="mode-label">REFRESH</span>
+    <button class="btn active" data-refresh="5">5s</button>
+    <button class="btn" data-refresh="15">15s</button>
+    <button class="btn" data-refresh="60">60s</button>
+    <button class="btn" data-refresh="0">pause</button>
+  </div>
+  <div class="status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">connecting…</span>
+    <span style="color:var(--ink-faint);margin-left:12px">last sync <span id="lastSync">—</span></span>
+  </div>
+</header>
+
+<section class="kpis">
+  <div class="kpi"><div class="lbl">24h Volume</div><div class="val" id="kpi-vol">—</div><div class="sub" id="kpi-vol-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Open Interest</div><div class="val" id="kpi-oi">—</div><div class="sub" id="kpi-oi-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Active Markets</div><div class="val" id="kpi-mkts">—</div><div class="sub" id="kpi-mkts-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">24h Trades</div><div class="val" id="kpi-trades">—</div><div class="sub" id="kpi-trades-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Top Gainer</div><div class="val" id="kpi-gainer" style="font-size:22px">—</div><div class="sub" id="kpi-gainer-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Top Loser</div><div class="val" id="kpi-loser" style="font-size:22px">—</div><div class="sub" id="kpi-loser-sub">&nbsp;</div></div>
+</section>
+
+<section class="grid">
+  <div class="panel">
+    <h2>Markets <span class="count" id="mktCount"></span>
+      <input id="mktFilter" placeholder="filter symbol…" style="margin-left:auto;width:140px;padding:3px 8px;font-size:11px" />
+    </h2>
+    <div class="market-table">
+      <table id="mktTable">
+        <thead>
+          <tr>
+            <th data-k="symbol">Symbol</th>
+            <th data-k="last_price" class="num">Price</th>
+            <th data-k="price_change" class="num">24h %</th>
+            <th data-k="volume_24h" class="num sorted">Volume</th>
+            <th data-k="oi_usd" class="num">OI</th>
+            <th data-k="funding" class="num">Funding</th>
+            <th data-k="trades_24h" class="num">Trades</th>
+            <th data-k="chart" class="num">Hist</th>
+          </tr>
+        </thead>
+        <tbody id="mktBody"><tr><td colspan="8" class="empty">loading markets…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div>
+    <div class="row">
+      <div class="panel">
+        <h2>Large Trades <span class="count" id="whaleCount"></span>
+          <select id="whaleThreshold" style="margin-left:auto;font-size:11px;padding:3px 8px">
+            <option value="10000">≥ $10k</option>
+            <option value="50000" selected>≥ $50k</option>
+            <option value="100000">≥ $100k</option>
+            <option value="250000">≥ $250k</option>
+            <option value="1000000">≥ $1M</option>
+          </select>
+        </h2>
+        <div style="max-height:320px;overflow:auto">
+          <table id="whaleTable">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Market</th>
+                <th>Side</th>
+                <th class="num">Price</th>
+                <th class="num">Size</th>
+                <th class="num">USD</th>
+              </tr>
+            </thead>
+            <tbody id="whaleBody"><tr><td colspan="6" class="empty">watching for large trades…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="panel">
+        <h2>Funding Heatmap <span class="count">hover for APR · click for history</span></h2>
+        <div class="heatmap" id="heatmap"><div class="empty" style="grid-column:1/-1">loading…</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="row three">
+  <div class="panel">
+    <h2>Buy / Sell Flow <span class="count">last 500 trades</span></h2>
+    <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:10px">
+      <div>
+        <div class="flow-lbl">Buy Volume</div>
+        <div class="up flow-val" id="buyVol">—</div>
+      </div>
+      <div>
+        <div class="flow-lbl">Sell Volume</div>
+        <div class="down flow-val" id="sellVol">—</div>
+      </div>
+      <div style="margin-left:auto;text-align:right">
+        <div class="flow-lbl">Delta</div>
+        <div id="deltaVol" class="flow-val">—</div>
+      </div>
+    </div>
+    <div class="flow-bar">
+      <div id="bar-buy" style="background:var(--green);width:50%"></div>
+      <div id="bar-sell" style="background:var(--red);width:50%"></div>
+    </div>
+    <div class="flow-pct"><span id="pctBuy">—</span><span id="pctSell">—</span></div>
+    <div style="margin-top:18px">
+      <div class="section-lbl">Top CVD — aggressor imbalance</div>
+      <table style="font-size:11px"><tbody id="cvdBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Liquidations <span class="count" id="liqCount"></span></h2>
+    <div style="max-height:380px;overflow:auto">
+      <table id="liqTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Market</th>
+            <th>Side</th>
+            <th class="num">Price</th>
+            <th class="num">USD</th>
+          </tr>
+        </thead>
+        <tbody id="liqBody"><tr><td colspan="5" class="empty">no liquidations detected</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Movers <span class="count">24h</span></h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div class="section-lbl" style="color:var(--green)">▲ Gainers</div>
+        <table style="font-size:11px"><tbody id="gainersBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
+      </div>
+      <div>
+        <div class="section-lbl" style="color:var(--red)">▼ Losers</div>
+        <table style="font-size:11px"><tbody id="losersBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <div class="section-lbl">Volume Leaders</div>
+      <table style="font-size:11px"><tbody id="volLeadBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
+    </div>
+  </div>
+</section>
+
+<!-- history drawer -->
+<div id="drawer" class="drawer">
+  <div class="drawer-head">
+    <span id="drawerTitle">History</span>
+    <div class="drawer-tabs">
+      <button class="btn-sm active" data-field="funding">Funding</button>
+      <button class="btn-sm" data-field="oi_usd">OI</button>
+      <button class="btn-sm" data-field="last_price">Price</button>
+    </div>
+    <div class="drawer-tabs" style="margin-left:auto">
+      <button class="btn-sm active" data-hours="24">24h</button>
+      <button class="btn-sm" data-hours="72">3d</button>
+      <button class="btn-sm" data-hours="168">7d</button>
+    </div>
+    <button class="drawer-close" id="drawerClose">×</button>
+  </div>
+  <div class="drawer-body">
+    <svg id="chart" viewBox="0 0 800 260" preserveAspectRatio="none"></svg>
+    <div id="chartStats" class="chart-stats"></div>
+  </div>
+</div>
+
+<footer>
+  <span>backend · <a href="/docs" target="_blank">/docs</a> · <a href="/api/status" target="_blank">/api/status</a></span>
+  <span style="color:var(--ink-faint)">·</span>
+  <span id="tickCount">0 polls</span>
+  <div class="spacer"></div>
+  <span>local backend · history persisted to sqlite</span>
+</footer>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
