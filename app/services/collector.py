@@ -32,11 +32,10 @@ def _num(x: Any, default: float = 0.0) -> float:
 def _normalise_markets(
     books: list[dict], stats: list[dict], fundings: list[dict]
 ) -> list[dict[str, Any]]:
-    stat_by_id: dict[int, dict] = {}
-    for s in stats:
-        mid = s.get("market_id", s.get("marketId"))
-        if mid is not None:
-            stat_by_id[int(mid)] = s
+    # exchangeStats has no market_id — join by symbol
+    stat_by_symbol: dict[str, dict] = {
+        s["symbol"]: s for s in stats if s.get("symbol")
+    }
 
     fund_by_id: dict[int, float] = {}
     for f in fundings:
@@ -51,13 +50,13 @@ def _normalise_markets(
         if mid_raw is None:
             continue
         mid = int(mid_raw)
-        s = stat_by_id.get(mid, {})
+        symbol = b.get("symbol") or f"MKT-{mid}"
+        s = stat_by_symbol.get(symbol, {})
         last = _num(s.get("last_trade_price") or b.get("last_trade_price"))
-        oi = _num(s.get("open_interest") or s.get("openInterest"))
         out.append(
             {
                 "market_id": mid,
-                "symbol": b.get("symbol") or s.get("symbol") or f"MKT-{mid}",
+                "symbol": symbol,
                 "status": b.get("status"),
                 "last_price": last,
                 "price_high_24h": _num(s.get("daily_price_high")),
@@ -66,8 +65,8 @@ def _normalise_markets(
                 "volume_24h": _num(s.get("daily_quote_token_volume")),
                 "base_volume_24h": _num(s.get("daily_base_token_volume")),
                 "trades_24h": int(_num(s.get("daily_trades_count"))),
-                "oi_base": oi,
-                "oi_usd": oi * last,
+                "oi_base": 0.0,
+                "oi_usd": 0.0,
                 "funding": fund_by_id.get(mid),
             }
         )
