@@ -56,7 +56,6 @@ async def markets():
         return {"markets": [], "summary": None, "ts": store.last_sync}
 
     total_vol = sum(m["volume_24h"] for m in store.markets)
-    total_oi = sum(m["oi_usd"] for m in store.markets)
     total_trades = sum(m["trades_24h"] for m in store.markets)
     active = sum(1 for m in store.markets if m["volume_24h"] > 0)
 
@@ -64,16 +63,25 @@ async def markets():
     top_gainer = by_change[0] if by_change else None
     top_loser = by_change[-1] if by_change else None
 
+    # Volume-weighted average funding across markets that have both funding + volume
+    funded = [m for m in store.markets if m.get("funding") is not None and m["volume_24h"] > 0]
+    funded_vol = sum(m["volume_24h"] for m in funded)
+    avg_funding = (
+        sum(m["funding"] * m["volume_24h"] for m in funded) / funded_vol
+        if funded_vol else None
+    )
+
     return {
         "markets": store.markets,
         "summary": {
             "total_volume_24h": total_vol,
-            "total_oi_usd": total_oi,
             "total_trades_24h": total_trades,
             "active_markets": active,
             "listed_markets": len(store.markets),
             "top_gainer": top_gainer,
             "top_loser": top_loser,
+            "avg_funding_weighted": avg_funding,
+            "funded_markets": len(funded),
         },
         "ts": store.last_sync,
     }

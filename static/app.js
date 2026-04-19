@@ -62,9 +62,17 @@ async function apiGet(path) {
 function renderKpis(summary) {
   if (!summary) return;
   $('#kpi-vol').textContent = fmtUsd(summary.total_volume_24h);
-  $('#kpi-vol-sub').textContent = 'quote · all perps';
-  $('#kpi-oi').textContent = fmtUsd(summary.total_oi_usd);
-  $('#kpi-oi-sub').textContent = 'notional · all perps';
+  $('#kpi-vol-sub').textContent = 'quote · all markets';
+  const avgF = summary.avg_funding_weighted;
+  if (avgF != null) {
+    $('#kpi-funding').textContent = (avgF * 100).toFixed(4) + '%';
+    $('#kpi-funding').className = 'val ' + (avgF > 0 ? 'up' : avgF < 0 ? 'down' : 'neutral');
+    const apr = avgF * 3 * 365 * 100;
+    $('#kpi-funding-sub').textContent = apr.toFixed(1) + '% APR · vol-weighted';
+  } else {
+    $('#kpi-funding').textContent = '—';
+    $('#kpi-funding-sub').textContent = 'waiting for data';
+  }
   $('#kpi-mkts').textContent = summary.active_markets + ' / ' + summary.listed_markets;
   $('#kpi-mkts-sub').textContent = 'trading · listed';
   $('#kpi-trades').textContent = Number(summary.total_trades_24h).toLocaleString();
@@ -110,12 +118,12 @@ function renderMarkets() {
         <td class="num ${flash}">${fmtUsd(m.last_price)}</td>
         <td class="num ${chgCls}">${fmtPct(m.price_change)}</td>
         <td class="num bar-cell"><div class="bar pos" style="width:${barPct}%"></div><span>${fmtUsd(m.volume_24h)}</span></td>
-        <td class="num">${fmtUsd(m.oi_usd)}</td>
+
         <td class="num ${fundCls}">${m.funding != null ? (m.funding * 100).toFixed(4) + '%' : '—'}</td>
         <td class="num">${Number(m.trades_24h).toLocaleString()}</td>
         <td class="num"><button class="chart-btn" data-mid="${m.market_id}" title="show history">▸</button></td>
       </tr>`;
-  }).join('') || `<tr><td colspan="8" class="empty">no markets match</td></tr>`;
+  }).join('') || `<tr><td colspan="7" class="empty">no markets match</td></tr>`;
 
   $$('#mktTable thead th').forEach(th => {
     th.classList.toggle('sorted', th.dataset.k === state.sortKey);
