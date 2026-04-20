@@ -25,6 +25,9 @@ _last_lit: float = 0.0
 _db_ready: bool = False
 _TTL = 5.0
 
+# market_id sentinel: None = all LIT markets, 120 = perp, 2049 = spot
+_VALID_MARKETS = {120, 2049}
+
 
 async def _maybe_refresh() -> None:
     global _last_market, _last_lit, _db_ready
@@ -47,6 +50,10 @@ async def _maybe_refresh() -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+def _market_filter(market: int | None) -> int | None:
+    return market if market in _VALID_MARKETS else None
+
+
 @router.get("/summary")
 async def summary():
     await _maybe_refresh()
@@ -65,22 +72,29 @@ async def summary():
 async def trades(
     limit: int = Query(100, ge=1, le=500),
     hours: int = Query(24, ge=1, le=720),
+    market_id: int | None = None,
 ):
     await _maybe_refresh()
-    data = await fetch_lit_trades(limit=limit, hours=hours)
+    data = await fetch_lit_trades(limit=limit, hours=hours, market_id=_market_filter(market_id))
     return {"trades": data, "count": len(data)}
 
 
 @router.get("/flow")
-async def flow(hours: int = Query(24, ge=1, le=720)):
+async def flow(
+    hours: int = Query(24, ge=1, le=720),
+    market_id: int | None = None,
+):
     await _maybe_refresh()
-    return await fetch_lit_flow(hours=hours)
+    return await fetch_lit_flow(hours=hours, market_id=_market_filter(market_id))
 
 
 @router.get("/leaders")
 async def leaders(
     hours: int = Query(24, ge=1, le=720),
     top_n: int = Query(15, ge=5, le=50),
+    market_id: int | None = None,
 ):
     await _maybe_refresh()
-    return await fetch_lit_leaders(hours=hours, top_n=top_n)
+    return await fetch_lit_leaders(
+        hours=hours, top_n=top_n, market_id=_market_filter(market_id)
+    )

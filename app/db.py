@@ -135,15 +135,22 @@ async def write_lit_trades(trades: list[dict[str, Any]]) -> int:
     return len(payload)
 
 
-async def fetch_lit_trades(limit: int = 100, hours: int = 24) -> list[dict[str, Any]]:
+async def fetch_lit_trades(
+    limit: int = 100, hours: int = 24, market_id: int | None = None
+) -> list[dict[str, Any]]:
     since_ms = int((time.time() - hours * 3600) * 1000)
+    where = "ts >= ?"
+    params: list = [since_ms]
+    if market_id is not None:
+        where += " AND market_id = ?"
+        params.append(market_id)
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute(
-            """SELECT trade_id, market_id, ts, price, size, usd,
+            f"""SELECT trade_id, market_id, ts, price, size, usd,
                       buyer_id, seller_id, taker_is_buyer
-               FROM lit_trades WHERE ts >= ?
+               FROM lit_trades WHERE {where}
                ORDER BY ts DESC LIMIT ?""",
-            (since_ms, limit),
+            (*params, limit),
         )
         rows = await cur.fetchall()
     return [
@@ -156,17 +163,22 @@ async def fetch_lit_trades(limit: int = 100, hours: int = 24) -> list[dict[str, 
     ]
 
 
-async def fetch_lit_flow(hours: int = 24) -> dict[str, Any]:
+async def fetch_lit_flow(hours: int = 24, market_id: int | None = None) -> dict[str, Any]:
     since_ms = int((time.time() - hours * 3600) * 1000)
+    where = "ts >= ?"
+    params: list = [since_ms]
+    if market_id is not None:
+        where += " AND market_id = ?"
+        params.append(market_id)
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute(
-            """SELECT
+            f"""SELECT
                 SUM(CASE WHEN taker_is_buyer=1 THEN usd ELSE 0 END),
                 SUM(CASE WHEN taker_is_buyer=0 THEN usd ELSE 0 END),
                 COUNT(*),
                 MIN(ts)
-               FROM lit_trades WHERE ts >= ?""",
-            (since_ms,),
+               FROM lit_trades WHERE {where}""",
+            params,
         )
         row = await cur.fetchone()
     buy_usd = row[0] or 0.0
@@ -178,33 +190,41 @@ async def fetch_lit_flow(hours: int = 24) -> dict[str, Any]:
         "trade_count": row[2] or 0,
         "oldest_ts": row[3],
         "hours": hours,
+        "market_id": market_id,
     }
 
 
-async def fetch_lit_leaders(hours: int = 24, top_n: int = 15) -> dict[str, Any]:
+async def fetch_lit_leaders(
+    hours: int = 24, top_n: int = 15, market_id: int | None = None
+) -> dict[str, Any]:
     since_ms = int((time.time() - hours * 3600) * 1000)
+    where = "ts >= ?"
+    params: list = [since_ms]
+    if market_id is not None:
+        where += " AND market_id = ?"
+        params.append(market_id)
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute(
-            """SELECT buyer_id, SUM(usd), COUNT(*)
-               FROM lit_trades WHERE ts >= ?
+            f"""SELECT buyer_id, SUM(usd), COUNT(*)
+               FROM lit_trades WHERE {where}
                GROUP BY buyer_id ORDER BY SUM(usd) DESC LIMIT ?""",
-            (since_ms, top_n),
+            (*params, top_n),
         )
         buyers = [
             {"account_id": r[0], "total_usd": r[1], "trade_count": r[2]}
             for r in await cur.fetchall()
         ]
         cur = await db.execute(
-            """SELECT seller_id, SUM(usd), COUNT(*)
-               FROM lit_trades WHERE ts >= ?
+            f"""SELECT seller_id, SUM(usd), COUNT(*)
+               FROM lit_trades WHERE {where}
                GROUP BY seller_id ORDER BY SUM(usd) DESC LIMIT ?""",
-            (since_ms, top_n),
+            (*params, top_n),
         )
         sellers = [
             {"account_id": r[0], "total_usd": r[1], "trade_count": r[2]}
             for r in await cur.fetchall()
         ]
-    return {"buyers": buyers, "sellers": sellers, "hours": hours}
+    return {"buyers": buyers, "sellers": sellers, "hours": hours, "market_id": market_id}
 
 
 async def fetch_lit_stats() -> dict[str, Any]:

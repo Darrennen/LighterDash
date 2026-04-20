@@ -4,6 +4,7 @@
 
 const state = {
   hours: 24,
+  market: '',        // '' = all, '120' = perp, '2049' = spot
   refreshMs: 10000,
   pollTimer: null,
   tickCount: 0,
@@ -90,7 +91,8 @@ function renderSummary(data) {
 }
 
 function renderFlow(data) {
-  const lbl = periodLabel(state.hours);
+  const mktLbl = state.market === '120' ? ' · perp' : state.market === '2049' ? ' · spot' : '';
+  const lbl = periodLabel(state.hours) + mktLbl;
   $('#flowPeriod').textContent = lbl;
 
   const buy = data.buy_usd || 0;
@@ -130,7 +132,8 @@ function renderFlow(data) {
 
 function renderTrades(trades) {
   const tbody = $('#litTradesBody');
-  $('#tradeCount').textContent = trades.length + ' in DB';
+  const mktLbl = state.market === '120' ? ' · perp' : state.market === '2049' ? ' · spot' : '';
+  $('#tradeCount').textContent = trades.length + ' in DB' + mktLbl;
 
   if (!trades.length) {
     tbody.innerHTML = `<tr><td colspan="8" class="empty">no trades stored yet — the DB fills as you browse</td></tr>`;
@@ -188,11 +191,12 @@ async function pollOnce() {
   try {
     setStatus('warn', 'syncing…');
     const h = state.hours;
+    const mq = state.market ? `&market_id=${state.market}` : '';
     const [summary, tradesRes, flow, leaders] = await Promise.all([
       apiGet('/api/lit/summary'),
-      apiGet('/api/lit/trades?limit=100&hours=24'),
-      apiGet(`/api/lit/flow?hours=${h}`),
-      apiGet(`/api/lit/leaders?hours=${h}&top_n=15`),
+      apiGet(`/api/lit/trades?limit=100&hours=24${mq}`),
+      apiGet(`/api/lit/flow?hours=${h}${mq}`),
+      apiGet(`/api/lit/leaders?hours=${h}&top_n=15${mq}`),
     ]);
 
     renderSummary(summary);
@@ -218,6 +222,15 @@ function schedule() {
 }
 
 // ── event wiring ──────────────────────────────────────────────
+
+$$('.controls .btn[data-market]').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('.controls .btn[data-market]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    state.market = b.dataset.market;
+    pollOnce();
+  });
+});
 
 $$('.controls .btn[data-hours]').forEach(b => {
   b.addEventListener('click', () => {
