@@ -14,6 +14,13 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 
 // ── formatters ────────────────────────────────────────────────
+const fmtDuration = h => {
+  if (!h) return '0m';
+  if (h < 1) return Math.round(h * 60) + 'm';
+  if (h < 48) return h.toFixed(1) + 'h';
+  return (h / 24).toFixed(1) + 'd';
+};
+
 const fmtUsd = n => {
   if (n == null || isNaN(n)) return '—';
   const abs = Math.abs(n), sign = n < 0 ? '-' : '';
@@ -90,7 +97,7 @@ function renderSummary(data) {
   }
 }
 
-function renderFlow(data) {
+function renderFlow(data, actualHours) {
   const mktLbl = state.market === '120' ? ' · perp' : state.market === '2049' ? ' · spot' : '';
   const lbl = periodLabel(state.hours) + mktLbl;
   $('#flowPeriod').textContent = lbl;
@@ -113,21 +120,24 @@ function renderFlow(data) {
 
   $('#flowTrades').textContent = Number(data.trade_count || 0).toLocaleString() + ' trades';
 
-  if (data.oldest_ts) {
-    const ageH = ((Date.now() - data.oldest_ts) / 3600000).toFixed(1);
-    $('#flowCoverage').textContent = ageH + 'h window';
+  const insufficient = actualHours > 0 && actualHours < state.hours * 0.95;
+  if (actualHours > 0) {
+    $('#flowCoverage').innerHTML = insufficient
+      ? `<span style="color:var(--amber)">⚠ only ${fmtDuration(actualHours)} collected</span>`
+      : fmtDuration(actualHours) + ' of data';
   } else {
     $('#flowCoverage').textContent = 'building…';
   }
 
-  // KPI cells
+  // KPI cells — show actual window in sub-label
+  const dataLbl = actualHours > 0 ? fmtDuration(actualHours) : lbl;
   $('#kpi-buy').textContent = fmtUsd(buy);
-  $('#kpi-buy-sub').textContent = lbl + ' · aggressive buys';
+  $('#kpi-buy-sub').textContent = dataLbl + ' · aggressive buys';
   $('#kpi-sell').textContent = fmtUsd(sell);
-  $('#kpi-sell-sub').textContent = lbl + ' · aggressive sells';
+  $('#kpi-sell-sub').textContent = dataLbl + ' · aggressive sells';
   $('#kpi-delta').textContent = fmtUsd(delta);
   $('#kpi-delta').className = 'val ' + (delta >= 0 ? 'up' : 'down');
-  $('#kpi-delta-sub').textContent = lbl + ' · net flow';
+  $('#kpi-delta-sub').textContent = dataLbl + ' · net flow';
 }
 
 function renderTrades(trades) {
@@ -157,10 +167,14 @@ function renderTrades(trades) {
   }).join('');
 }
 
-function renderLeaders(data) {
+function renderLeaders(data, actualHours) {
   const lbl = periodLabel(state.hours);
-  $('#buyersPeriod').textContent = lbl + ' · by USD bought';
-  $('#sellersPeriod').textContent = lbl + ' · by USD sold';
+  const insufficient = actualHours > 0 && actualHours < state.hours * 0.95;
+  const coverageSuffix = insufficient
+    ? ` · <span style="color:var(--amber)">⚠ ${fmtDuration(actualHours)} of data</span>`
+    : '';
+  $('#buyersPeriod').innerHTML = lbl + ' · by USD bought' + coverageSuffix;
+  $('#sellersPeriod').innerHTML = lbl + ' · by USD sold' + coverageSuffix;
 
   const leaderRow = (item, rank) => {
     const avg = item.trade_count > 0 ? item.total_usd / item.trade_count : 0;
@@ -199,10 +213,27 @@ async function pollOnce() {
       apiGet(`/api/lit/leaders?hours=${h}&top_n=15${mq}`),
     ]);
 
+    const actualHours = flow.oldest_ts
+      ? (Date.now() - flow.oldest_ts) / 3600000
+      : 0;
+
+    // Update period button labels to reflect actual data age
+    $$('.controls .btn[data-hours]').forEach(b => {
+      const bh = Number(b.dataset.hours);
+      const orig = b.dataset.label || (b.dataset.label = b.textContent);
+      if (actualHours > 0 && actualHours < bh * 0.95) {
+        b.textContent = orig + ' (' + fmtDuration(actualHours) + ')';
+        if (!b.classList.contains('active')) b.style.color = 'var(--amber)';
+      } else {
+        b.textContent = orig;
+        b.style.color = '';
+      }
+    });
+
     renderSummary(summary);
     renderTrades(tradesRes.trades || []);
-    renderFlow(flow);
-    renderLeaders(leaders);
+    renderFlow(flow, actualHours);
+    renderLeaders(leaders, actualHours);
 
     state.tickCount++;
     $('#tickCount').textContent = state.tickCount + ' polls';
