@@ -43,6 +43,16 @@
     <button class="btn" data-refresh="30">30s</button>
     <button class="btn" data-refresh="0">pause</button>
   </div>
+  <div class="controls" style="margin-left:0">
+    <span class="mode-label">BIG BUY</span>
+    <select id="whaleSelect" style="font-size:10px;padding:4px 8px;letter-spacing:.1em;text-transform:uppercase">
+      <option value="50000">≥ $50K</option>
+      <option value="100000" selected>≥ $100K</option>
+      <option value="250000">≥ $250K</option>
+      <option value="500000">≥ $500K</option>
+      <option value="1000000">≥ $1M</option>
+    </select>
+  </div>
   <a href="/" class="nav-pill">← overview</a>
   <div class="status">
     <span class="dot" id="statusDot"></span>

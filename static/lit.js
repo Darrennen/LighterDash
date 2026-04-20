@@ -5,6 +5,7 @@
 const state = {
   hours: 24,
   market: '',        // '' = all, '120' = perp, '2049' = spot
+  whaleMin: 100000,
   refreshMs: 10000,
   pollTimer: null,
   tickCount: 0,
@@ -153,14 +154,29 @@ function renderTrades(trades) {
   tbody.innerHTML = trades.map(t => {
     const isBuy = t.taker_is_buyer === 1;
     const mkt = t.market_id === 120 ? 'PERP' : 'SPOT';
-    const usdCls = t.usd >= 10000 ? 'up' : t.usd >= 1000 ? '' : 'neutral';
-    return `<tr>
+    const bigBuy = isBuy && t.usd >= state.whaleMin;
+    const mega   = isBuy && t.usd >= 1_000_000;
+    const tier1  = isBuy && t.usd >= 500_000;
+
+    const rowStyle = bigBuy
+      ? 'background:rgba(111,224,137,0.07);box-shadow:inset 3px 0 0 var(--green)'
+      : '';
+    const usdCls = bigBuy ? 'up' : t.usd >= 10000 ? '' : 'neutral';
+    const badge = mega
+      ? `<span class="tier t1" style="margin-left:4px">MEGA</span>`
+      : tier1
+      ? `<span class="tier t2" style="margin-left:4px">BIG</span>`
+      : bigBuy
+      ? `<span class="tier t3" style="margin-left:4px">BIG</span>`
+      : '';
+
+    return `<tr style="${rowStyle}">
       <td style="color:var(--ink-dim)">${fmtTime(t.ts)}</td>
       <td style="color:var(--ink-faint);font-size:10px;letter-spacing:.06em">${mkt}</td>
-      <td><span class="pill ${isBuy ? 'buy' : 'sell'}">${isBuy ? 'buy' : 'sell'}</span></td>
+      <td><span class="pill ${isBuy ? 'buy' : 'sell'}">${isBuy ? 'buy' : 'sell'}</span>${badge}</td>
       <td class="num">$${Number(t.price).toFixed(4)}</td>
       <td class="num">${fmtNum(t.size, 2)}</td>
-      <td class="num ${usdCls}">${fmtUsd(t.usd)}</td>
+      <td class="num ${usdCls}" style="${bigBuy ? 'font-weight:700' : ''}">${fmtUsd(t.usd)}</td>
       <td class="num acct">${fmtAcct(t.buyer_id)}</td>
       <td class="num acct">${fmtAcct(t.seller_id)}</td>
     </tr>`;
@@ -230,8 +246,9 @@ async function pollOnce() {
       }
     });
 
+    state._lastTrades = tradesRes.trades || [];
     renderSummary(summary);
-    renderTrades(tradesRes.trades || []);
+    renderTrades(state._lastTrades);
     renderFlow(flow, actualHours);
     renderLeaders(leaders, actualHours);
 
@@ -253,6 +270,12 @@ function schedule() {
 }
 
 // ── event wiring ──────────────────────────────────────────────
+
+$('#whaleSelect').addEventListener('change', e => {
+  state.whaleMin = Number(e.target.value);
+  // re-render trades only — no need to re-fetch
+  if (state._lastTrades) renderTrades(state._lastTrades);
+});
 
 $$('.controls .btn[data-market]').forEach(b => {
   b.addEventListener('click', () => {
