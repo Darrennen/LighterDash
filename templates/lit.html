@@ -190,6 +190,45 @@
   </div>
 </section>
 
+<!-- TWAP alerts -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>TWAP Alerts
+    <span class="count" id="twapCount"></span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <span style="color:var(--ink-faint);font-size:10px">WINDOW</span>
+      <select id="twapWindowSelect" style="font-size:10px;padding:3px 8px;text-transform:uppercase;letter-spacing:.08em">
+        <option value="300000">5 min</option>
+        <option value="600000" selected>10 min</option>
+        <option value="900000">15 min</option>
+        <option value="1800000">30 min</option>
+      </select>
+      <span style="color:var(--ink-faint);font-size:10px">MIN TRADES</span>
+      <select id="twapMinTrades" style="font-size:10px;padding:3px 8px">
+        <option value="2">2</option>
+        <option value="3" selected>3</option>
+        <option value="5">5</option>
+      </select>
+    </span>
+  </h2>
+  <table id="twapTable">
+    <thead>
+      <tr>
+        <th>Account</th>
+        <th class="num">Cumulative Buy</th>
+        <th class="num">Trades</th>
+        <th class="num">Avg / Trade</th>
+        <th class="num">Largest Single</th>
+        <th class="num">First Seen</th>
+        <th class="num">Last Seen</th>
+        <th class="num">Spacing</th>
+      </tr>
+    </thead>
+    <tbody id="twapBody">
+      <tr><td colspan="8" class="empty">no TWAP patterns detected</td></tr>
+    </tbody>
+  </table>
+</div>
+
 <!-- leaders tables -->
 <div class="leaders-grid">
   <div class="panel">

@@ -6,6 +6,8 @@ const state = {
   hours: 24,
   market: '',        // '' = all, '120' = perp, '2049' = spot
   whaleMin: 100000,
+  twapWindowMs: 600000,   // 10 min rolling window
+  twapMinTrades: 3,
   refreshMs: 10000,
   pollTimer: null,
   tickCount: 0,
@@ -154,11 +156,14 @@ function renderTrades(trades) {
   tbody.innerHTML = trades.map(t => {
     const isBuy = t.taker_is_buyer === 1;
     const mkt = t.market_id === 120 ? 'PERP' : 'SPOT';
-    const bigBuy = isBuy && t.usd >= state.whaleMin;
-    const mega   = isBuy && t.usd >= 1_000_000;
-    const tier1  = isBuy && t.usd >= 500_000;
+    const bigBuy  = isBuy && t.usd >= state.whaleMin;
+    const mega    = isBuy && t.usd >= 1_000_000;
+    const tier1   = isBuy && t.usd >= 500_000;
+    const isTwap  = isBuy && (state._twapBuyers || new Set()).has(t.buyer_id);
 
-    const rowStyle = bigBuy
+    const rowStyle = isTwap
+      ? 'background:rgba(242,193,78,0.06);box-shadow:inset 3px 0 0 var(--amber)'
+      : bigBuy
       ? 'background:rgba(111,224,137,0.07);box-shadow:inset 3px 0 0 var(--green)'
       : '';
     const usdCls = bigBuy ? 'up' : t.usd >= 10000 ? '' : 'neutral';
@@ -168,6 +173,8 @@ function renderTrades(trades) {
       ? `<span class="tier t2" style="margin-left:4px">BIG</span>`
       : bigBuy
       ? `<span class="tier t3" style="margin-left:4px">BIG</span>`
+      : isTwap
+      ? `<span class="tier t3" style="margin-left:4px;background:rgba(242,193,78,0.2);color:var(--amber)">TWAP</span>`
       : '';
 
     return `<tr style="${rowStyle}">
@@ -215,6 +222,78 @@ function renderLeaders(data, actualHours) {
     : `<tr><td colspan="5" class="empty">no data yet — history builds over time</td></tr>`;
 }
 
+// ── TWAP detection ────────────────────────────────────────────
+
+function detectTwap(trades) {
+  const cutoff = Date.now() - state.twapWindowMs;
+  const byBuyer = new Map();
+
+  for (const t of trades) {
+    if (t.taker_is_buyer !== 1) continue;
+    if (t.ts < cutoff) continue;
+    if (!byBuyer.has(t.buyer_id)) {
+      byBuyer.set(t.buyer_id, { total_usd: 0, count: 0, max_usd: 0, first_ts: t.ts, last_ts: t.ts, tsList: [] });
+    }
+    const acc = byBuyer.get(t.buyer_id);
+    acc.total_usd += t.usd;
+    acc.count++;
+    acc.max_usd = Math.max(acc.max_usd, t.usd);
+    acc.first_ts = Math.min(acc.first_ts, t.ts);
+    acc.last_ts  = Math.max(acc.last_ts,  t.ts);
+    acc.tsList.push(t.ts);
+  }
+
+  const alerts = [];
+  for (const [buyer_id, acc] of byBuyer) {
+    if (acc.total_usd < state.whaleMin) continue;
+    if (acc.count < state.twapMinTrades) continue;
+    // Avg spacing between consecutive trades (ms)
+    acc.tsList.sort((a, b) => a - b);
+    const gaps = acc.tsList.slice(1).map((ts, i) => ts - acc.tsList[i]);
+    const avgSpacingMs = gaps.length ? gaps.reduce((s, g) => s + g, 0) / gaps.length : 0;
+    alerts.push({ buyer_id, ...acc, avgSpacingMs });
+  }
+
+  return alerts.sort((a, b) => b.total_usd - a.total_usd);
+}
+
+function renderTwap(alerts) {
+  const tbody = $('#twapBody');
+  $('#twapCount').textContent = alerts.length
+    ? alerts.length + ' active · ' + fmtDuration(state.twapWindowMs / 3600000) + ' window'
+    : '';
+
+  if (!alerts.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">no accounts accumulating ≥ ${fmtUsd(state.whaleMin)} in ${fmtDuration(state.twapWindowMs/3600000)} with ${state.twapMinTrades}+ trades</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = alerts.map(a => {
+    const avg = a.total_usd / a.count;
+    const spannedMs = a.last_ts - a.first_ts;
+    const spacingLbl = a.avgSpacingMs >= 60000
+      ? (a.avgSpacingMs / 60000).toFixed(1) + 'min'
+      : Math.round(a.avgSpacingMs / 1000) + 's';
+    const mega = a.total_usd >= 1_000_000;
+    const big  = a.total_usd >= 500_000;
+    const badge = mega
+      ? `<span class="tier t1" style="margin-right:6px">MEGA</span>`
+      : big
+      ? `<span class="tier t2" style="margin-right:6px">BIG</span>`
+      : `<span class="tier t3" style="margin-right:6px">TWAP</span>`;
+    return `<tr style="background:rgba(111,224,137,0.05);box-shadow:inset 3px 0 0 var(--amber)">
+      <td class="acct" style="font-size:12px">${badge}${fmtAcct(a.buyer_id)}</td>
+      <td class="num up" style="font-weight:700">${fmtUsd(a.total_usd)}</td>
+      <td class="num">${a.count}</td>
+      <td class="num" style="color:var(--ink-dim)">${fmtUsd(avg)}</td>
+      <td class="num" style="color:var(--ink-dim)">${fmtUsd(a.max_usd)}</td>
+      <td class="num" style="color:var(--ink-dim)">${fmtTime(a.first_ts)}</td>
+      <td class="num" style="color:var(--ink-dim)">${fmtTime(a.last_ts)}</td>
+      <td class="num" style="color:var(--amber)">${spacingLbl} avg</td>
+    </tr>`;
+  }).join('');
+}
+
 // ── main poll ─────────────────────────────────────────────────
 
 async function pollOnce() {
@@ -247,10 +326,13 @@ async function pollOnce() {
     });
 
     state._lastTrades = tradesRes.trades || [];
+    const twapAlerts = detectTwap(state._lastTrades);
+    state._twapBuyers = new Set(twapAlerts.map(a => a.buyer_id));
     renderSummary(summary);
     renderTrades(state._lastTrades);
     renderFlow(flow, actualHours);
     renderLeaders(leaders, actualHours);
+    renderTwap(twapAlerts);
 
     state.tickCount++;
     $('#tickCount').textContent = state.tickCount + ' polls';
@@ -273,8 +355,31 @@ function schedule() {
 
 $('#whaleSelect').addEventListener('change', e => {
   state.whaleMin = Number(e.target.value);
-  // re-render trades only — no need to re-fetch
-  if (state._lastTrades) renderTrades(state._lastTrades);
+  if (state._lastTrades) {
+    state._twapBuyers = new Set(detectTwap(state._lastTrades).map(a => a.buyer_id));
+    renderTrades(state._lastTrades);
+    renderTwap(detectTwap(state._lastTrades));
+  }
+});
+
+$('#twapWindowSelect').addEventListener('change', e => {
+  state.twapWindowMs = Number(e.target.value);
+  if (state._lastTrades) {
+    const alerts = detectTwap(state._lastTrades);
+    state._twapBuyers = new Set(alerts.map(a => a.buyer_id));
+    renderTrades(state._lastTrades);
+    renderTwap(alerts);
+  }
+});
+
+$('#twapMinTrades').addEventListener('change', e => {
+  state.twapMinTrades = Number(e.target.value);
+  if (state._lastTrades) {
+    const alerts = detectTwap(state._lastTrades);
+    state._twapBuyers = new Set(alerts.map(a => a.buyer_id));
+    renderTrades(state._lastTrades);
+    renderTwap(alerts);
+  }
 });
 
 $$('.controls .btn[data-market]').forEach(b => {
