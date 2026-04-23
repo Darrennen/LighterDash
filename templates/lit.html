@@ -190,9 +190,15 @@
   </div>
 </section>
 
-<!-- TWAP alerts -->
+<!-- CVD chart -->
 <div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <h2>TWAP Alerts
+  <h2>Cumulative Volume Delta <span class="count">buy − sell pressure over time</span></h2>
+  <div id="cvdChart" style="min-height:72px"></div>
+</div>
+
+<!-- TWAP / Pressure alerts -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>Pressure Alerts · TWAP
     <span class="count" id="twapCount"></span>
     <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
       <span style="color:var(--ink-faint);font-size:10px">WINDOW</span>
@@ -213,8 +219,9 @@
   <table id="twapTable">
     <thead>
       <tr>
+        <th>Side</th>
         <th>Account</th>
-        <th class="num">Cumulative Buy</th>
+        <th class="num">Cumulative USD</th>
         <th class="num">Trades</th>
         <th class="num">Avg / Trade</th>
         <th class="num">Largest Single</th>
@@ -224,7 +231,7 @@
       </tr>
     </thead>
     <tbody id="twapBody">
-      <tr><td colspan="8" class="empty">no TWAP patterns detected</td></tr>
+      <tr><td colspan="9" class="empty">no TWAP patterns detected</td></tr>
     </tbody>
   </table>
 </div>
