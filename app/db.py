@@ -205,26 +205,56 @@ async def fetch_lit_leaders(
         params.append(market_id)
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute(
-            f"""SELECT buyer_id, SUM(usd), COUNT(*)
+            f"""SELECT buyer_id, SUM(usd), COUNT(*), MIN(ts), MAX(ts)
                FROM lit_trades WHERE {where}
                GROUP BY buyer_id ORDER BY SUM(usd) DESC LIMIT ?""",
             (*params, top_n),
         )
         buyers = [
-            {"account_id": r[0], "total_usd": r[1], "trade_count": r[2]}
+            {"account_id": r[0], "total_usd": r[1], "trade_count": r[2],
+             "first_ts": r[3], "last_ts": r[4]}
             for r in await cur.fetchall()
         ]
         cur = await db.execute(
-            f"""SELECT seller_id, SUM(usd), COUNT(*)
+            f"""SELECT seller_id, SUM(usd), COUNT(*), MIN(ts), MAX(ts)
                FROM lit_trades WHERE {where}
                GROUP BY seller_id ORDER BY SUM(usd) DESC LIMIT ?""",
             (*params, top_n),
         )
         sellers = [
-            {"account_id": r[0], "total_usd": r[1], "trade_count": r[2]}
+            {"account_id": r[0], "total_usd": r[1], "trade_count": r[2],
+             "first_ts": r[3], "last_ts": r[4]}
             for r in await cur.fetchall()
         ]
     return {"buyers": buyers, "sellers": sellers, "hours": hours, "market_id": market_id}
+
+
+async def fetch_lit_account_trades(
+    account_id: int, hours: int = 24, role: str = "buyer",
+    market_id: int | None = None,
+) -> list[dict[str, Any]]:
+    since_ms = int((time.time() - hours * 3600) * 1000)
+    id_col = "buyer_id" if role == "buyer" else "seller_id"
+    where = f"ts >= ? AND {id_col} = ?"
+    params: list = [since_ms, account_id]
+    if market_id is not None:
+        where += " AND market_id = ?"
+        params.append(market_id)
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            f"""SELECT trade_id, market_id, ts, price, size, usd,
+                       buyer_id, seller_id, taker_is_buyer
+               FROM lit_trades WHERE {where}
+               ORDER BY ts DESC LIMIT 200""",
+            params,
+        )
+        rows = await cur.fetchall()
+    return [
+        {"trade_id": r[0], "market_id": r[1], "ts": r[2], "price": r[3],
+         "size": r[4], "usd": r[5], "buyer_id": r[6], "seller_id": r[7],
+         "taker_is_buyer": r[8]}
+        for r in rows
+    ]
 
 
 async def fetch_lit_stats() -> dict[str, Any]:

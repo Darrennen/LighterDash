@@ -8,6 +8,7 @@ import time
 from fastapi import APIRouter, Query
 
 from app.db import (
+    fetch_lit_account_trades,
     fetch_lit_flow,
     fetch_lit_leaders,
     fetch_lit_stats,
@@ -86,6 +87,22 @@ async def flow(
 ):
     await _maybe_refresh()
     return await fetch_lit_flow(hours=hours, market_id=_market_filter(market_id))
+
+
+@router.get("/account")
+async def account_trades(
+    account_id: int,
+    hours: int = Query(24, ge=1, le=720),
+    role: str = Query("buyer"),
+    market_id: int | None = None,
+):
+    await _maybe_refresh()
+    safe_role = role if role in ("buyer", "seller") else "buyer"
+    data = await fetch_lit_account_trades(
+        account_id=account_id, hours=hours,
+        role=safe_role, market_id=_market_filter(market_id),
+    )
+    return {"trades": data, "count": len(data), "account_id": account_id, "role": safe_role}
 
 
 @router.get("/leaders")

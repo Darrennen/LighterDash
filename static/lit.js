@@ -36,6 +36,17 @@ const fmtPrice = n => n == null ? '—' : '$' + Number(n).toFixed(4);
 const fmtNum = (n, dp = 2) => n == null ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 const fmtPct = (n, dp = 2) => n == null ? '—' : (n >= 0 ? '+' : '') + Number(n).toFixed(dp) + '%';
 const fmtTime = ts => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleTimeString('en-GB', { hour12: false });
+const fmtMYT  = ts => {
+  const d = new Date(ts > 1e12 ? ts : ts * 1000);
+  return d.toLocaleString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur', hour12: false,
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+};
+const fmtTimeMYT = ts => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleTimeString('en-MY', {
+  timeZone: 'Asia/Kuala_Lumpur', hour12: false,
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+});
 const fmtAcct = id => id ? '#' + id : '—';
 const periodLabel = h => h === 24 ? '24h' : h === 168 ? '7d' : h === 720 ? '30d' : h + 'h';
 
@@ -212,30 +223,111 @@ function renderLeaders(data, actualHours) {
   const coverageSuffix = insufficient
     ? ` · <span style="color:var(--amber)">⚠ ${fmtDuration(actualHours)} of data</span>`
     : '';
-  $('#buyersPeriod').innerHTML = lbl + ' · by USD bought' + coverageSuffix;
-  $('#sellersPeriod').innerHTML = lbl + ' · by USD sold' + coverageSuffix;
+  $('#buyersPeriod').innerHTML  = lbl + ' · by USD bought' + coverageSuffix;
+  $('#sellersPeriod').innerHTML = lbl + ' · by USD sold'   + coverageSuffix;
 
-  const leaderRow = (item, rank) => {
+  const leaderRow = (item, rank, role) => {
     const avg = item.trade_count > 0 ? item.total_usd / item.trade_count : 0;
-    return `<tr>
+    const firstMYT = item.first_ts ? fmtMYT(item.first_ts) : '—';
+    const lastMYT  = item.last_ts  ? fmtMYT(item.last_ts)  : '—';
+    return `<tr class="leader-row" data-id="${item.account_id}" data-role="${role}"
+               style="cursor:pointer" title="Click to see trade timeline">
       <td class="rank">${rank}</td>
       <td class="acct" style="font-size:12px">${fmtAcct(item.account_id)}</td>
       <td class="num">${fmtUsd(item.total_usd)}</td>
       <td class="num">${Number(item.trade_count).toLocaleString()}</td>
       <td class="num" style="color:var(--ink-dim)">${fmtUsd(avg)}</td>
+      <td class="num" style="color:var(--ink-faint);font-size:10px">${firstMYT}</td>
+      <td class="num" style="color:var(--ink-faint);font-size:10px">${lastMYT}</td>
+    </tr>
+    <tr class="expand-row" id="expand-${role}-${item.account_id}" style="display:none">
+      <td colspan="7" style="padding:0"></td>
     </tr>`;
   };
 
-  const buyers = data.buyers || [];
+  const buyers  = data.buyers  || [];
   const sellers = data.sellers || [];
 
   $('#buyersBody').innerHTML = buyers.length
-    ? buyers.map((b, i) => leaderRow(b, i + 1)).join('')
-    : `<tr><td colspan="5" class="empty">no data yet — history builds over time</td></tr>`;
+    ? buyers.map((b, i) => leaderRow(b, i + 1, 'buyer')).join('')
+    : `<tr><td colspan="7" class="empty">no data yet — history builds over time</td></tr>`;
 
   $('#sellersBody').innerHTML = sellers.length
-    ? sellers.map((s, i) => leaderRow(s, i + 1)).join('')
-    : `<tr><td colspan="5" class="empty">no data yet — history builds over time</td></tr>`;
+    ? sellers.map((s, i) => leaderRow(s, i + 1, 'seller')).join('')
+    : `<tr><td colspan="7" class="empty">no data yet — history builds over time</td></tr>`;
+
+  // wire click-to-expand
+  $$('.leader-row').forEach(row => {
+    row.addEventListener('click', () => toggleLeaderExpand(
+      row.dataset.id, row.dataset.role
+    ));
+  });
+}
+
+async function toggleLeaderExpand(accountId, role) {
+  const expandRow = $(`#expand-${role}-${accountId}`);
+  if (!expandRow) return;
+
+  if (expandRow.style.display !== 'none') {
+    expandRow.style.display = 'none';
+    return;
+  }
+
+  const cell = expandRow.querySelector('td');
+  cell.innerHTML = `<div style="padding:10px;color:var(--ink-faint);font-size:11px">loading timeline…</div>`;
+  expandRow.style.display = '';
+
+  try {
+    const mq = state.market ? `&market_id=${state.market}` : '';
+    const data = await apiGet(`/api/lit/account?account_id=${accountId}&hours=${state.hours}&role=${role}${mq}`);
+    const trades = data.trades || [];
+
+    if (!trades.length) {
+      cell.innerHTML = `<div style="padding:10px;color:var(--ink-faint);font-size:11px">no trades found in this window</div>`;
+      return;
+    }
+
+    const isBuyer = role === 'buyer';
+    const rows = trades.map(t => {
+      const mkt = t.market_id === 120 ? 'PERP' : 'SPOT';
+      const side = t.taker_is_buyer === 1 ? 'buy' : 'sell';
+      const bigFlag = t.usd >= state.whaleMin
+        ? `<span style="color:${isBuyer ? 'var(--green)' : 'var(--red)'};font-size:9px;margin-left:4px">●</span>`
+        : '';
+      return `<tr style="font-size:11px;border-bottom:1px solid var(--line)">
+        <td style="padding:4px 8px;color:var(--ink-faint)">${fmtTimeMYT(t.ts)} MYT</td>
+        <td style="padding:4px 8px;color:var(--ink-faint);font-size:10px">${mkt}</td>
+        <td style="padding:4px 8px"><span class="pill ${side}">${side}</span></td>
+        <td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums">$${Number(t.price).toFixed(4)}</td>
+        <td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums">${fmtNum(t.size, 2)}</td>
+        <td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums;font-weight:${t.usd >= state.whaleMin ? '700' : '400'}">${fmtUsd(t.usd)}${bigFlag}</td>
+      </tr>`;
+    }).join('');
+
+    cell.innerHTML = `
+      <div style="padding:8px 12px;background:var(--bg);border-top:1px solid var(--line-2)">
+        <div style="font-size:10px;color:var(--ink-faint);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">
+          Timeline · Account ${fmtAcct(accountId)} · ${trades.length} trades · MYT (UTC+8)
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="font-size:10px;color:var(--ink-faint)">
+                <th style="padding:2px 8px;text-align:left;font-weight:500">Time (MYT)</th>
+                <th style="padding:2px 8px;text-align:left;font-weight:500">Mkt</th>
+                <th style="padding:2px 8px;text-align:left;font-weight:500">Side</th>
+                <th style="padding:2px 8px;text-align:right;font-weight:500">Price</th>
+                <th style="padding:2px 8px;text-align:right;font-weight:500">Size</th>
+                <th style="padding:2px 8px;text-align:right;font-weight:500">USD</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch (e) {
+    cell.innerHTML = `<div style="padding:10px;color:var(--red);font-size:11px">error loading timeline: ${e.message}</div>`;
+  }
 }
 
 // ── TWAP detection ────────────────────────────────────────────
