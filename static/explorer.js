@@ -1,0 +1,216 @@
+/* ──────────────────────────────────────────────────────────────
+   Lighter Account Explorer
+   ────────────────────────────────────────────────────────────── */
+
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
+const fmtUsd = n => {
+  if (n == null || isNaN(n)) return '—';
+  const abs = Math.abs(n), sign = n < 0 ? '-' : '';
+  if (abs >= 1e9) return sign + '$' + (abs / 1e9).toFixed(2) + 'B';
+  if (abs >= 1e6) return sign + '$' + (abs / 1e6).toFixed(2) + 'M';
+  if (abs >= 1e3) return sign + '$' + (abs / 1e3).toFixed(2) + 'K';
+  return sign + '$' + abs.toFixed(2);
+};
+const fmtNum = (n, dp = 4) => n == null ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+const fmtMYT = ts => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleString('en-MY', {
+  timeZone: 'Asia/Kuala_Lumpur', hour12: false,
+  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
+});
+const truncAddr = a => a ? a.slice(0, 6) + '…' + a.slice(-4) : '—';
+
+let _currentAccountIndex = null;
+
+// ── tab switching ─────────────────────────────────────────────
+
+$$('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    $$('.tab').forEach(t => t.classList.remove('active'));
+    $$('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    $(`#tab-${tab.dataset.tab}`).classList.add('active');
+
+    if (tab.dataset.tab === 'lit-history' && _currentAccountIndex != null) {
+      loadLitHistory(_currentAccountIndex);
+    }
+  });
+});
+
+// ── render functions ──────────────────────────────────────────
+
+function renderAccount(data) {
+  $('#results').style.display = '';
+  const idx = data.account_index;
+  _currentAccountIndex = idx;
+
+  $('#acctTitle').textContent = `Account #${idx}`;
+  const addr = data.l1_address || '';
+  $('#acctAddr').childNodes[0].textContent = addr || 'no address on file';
+  const extLink = $('#acctExtLink');
+  if (addr) {
+    extLink.href = `https://app.lighter.xyz/explorer/accounts/${addr}`;
+    extLink.style.display = '';
+  } else {
+    extLink.style.display = 'none';
+  }
+
+  const statusLabel = data.status === 1 ? '● Active' : '○ Inactive';
+  const statusColor = data.status === 1 ? 'var(--green)' : 'var(--ink-faint)';
+  $('#acctStatus').innerHTML = `<span style="color:${statusColor};font-size:12px">${statusLabel}</span>`;
+
+  $('#cardPortfolio').textContent = fmtUsd(parseFloat(data.total_asset_value));
+  $('#cardCollateral').textContent = fmtUsd(parseFloat(data.collateral));
+  $('#cardAvail').textContent = fmtUsd(parseFloat(data.available_balance));
+  $('#cardOrders').textContent = data.pending_order_count ?? '—';
+
+  renderPositions(data.positions || []);
+  renderAssets(data.assets || []);
+
+  // reset LIT history tab
+  $('#litHistBody').innerHTML = `<tr><td colspan="7" class="empty">click the "LIT History" tab to load</td></tr>`;
+}
+
+function renderPositions(positions) {
+  const tbody = $('#posBody');
+  if (!positions.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty">no open positions</td></tr>`;
+    return;
+  }
+
+  // sort by abs position value desc
+  positions.sort((a, b) => Math.abs(parseFloat(b.position_value)) - Math.abs(parseFloat(a.position_value)));
+
+  tbody.innerHTML = positions.map(p => {
+    const isLong = parseInt(p.sign) >= 0;
+    const size = parseFloat(p.position);
+    const pnl = parseFloat(p.unrealized_pnl || 0);
+    const funding = parseFloat(p.total_funding_paid_out || 0);
+    const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const sideCls = isLong ? 'pos-long' : 'pos-short';
+    const liqPrice = parseFloat(p.liquidation_price);
+    const liqDisplay = liqPrice > 0 ? '$' + liqPrice.toFixed(4) : '—';
+
+    return `<tr>
+      <td style="font-weight:600">${p.symbol}</td>
+      <td><span class="pill ${isLong ? 'buy' : 'sell'}">${isLong ? 'long' : 'short'}</span></td>
+      <td class="num ${sideCls}">${fmtNum(size, 2)}</td>
+      <td class="num">$${fmtNum(parseFloat(p.avg_entry_price), 4)}</td>
+      <td class="num">${fmtUsd(parseFloat(p.position_value))}</td>
+      <td class="num ${pnlCls}" style="font-weight:600">${fmtUsd(pnl)}</td>
+      <td class="num" style="color:var(--red)">${liqDisplay}</td>
+      <td class="num" style="color:var(--ink-dim)">${funding !== 0 ? fmtUsd(funding) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderAssets(assets) {
+  const tbody = $('#assetBody');
+  if (!assets.length) {
+    tbody.innerHTML = `<tr><td colspan="3" class="empty">no spot assets held</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = assets.map(a => {
+    const bal = parseFloat(a.balance);
+    const locked = parseFloat(a.locked_balance || 0);
+    return `<tr>
+      <td style="font-weight:600">${a.symbol}</td>
+      <td class="num">${fmtNum(bal, 6)}</td>
+      <td class="num" style="color:${locked > 0 ? 'var(--amber)' : 'var(--ink-faint)'}">${locked > 0 ? fmtNum(locked, 6) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadLitHistory(accountIndex) {
+  const tbody = $('#litHistBody');
+  tbody.innerHTML = `<tr><td colspan="7" class="empty">loading…</td></tr>`;
+
+  try {
+    // fetch both buyer and seller history and merge
+    const [buyerRes, sellerRes] = await Promise.all([
+      fetch(`/api/lit/account?account_id=${accountIndex}&hours=720&role=buyer`).then(r => r.json()),
+      fetch(`/api/lit/account?account_id=${accountIndex}&hours=720&role=seller`).then(r => r.json()),
+    ]);
+
+    const allTrades = [
+      ...(buyerRes.trades || []),
+      ...(sellerRes.trades || []),
+    ];
+
+    // deduplicate by trade_id and sort newest first
+    const seen = new Set();
+    const trades = allTrades
+      .filter(t => { if (seen.has(t.trade_id)) return false; seen.add(t.trade_id); return true; })
+      .sort((a, b) => b.ts - a.ts);
+
+    if (!trades.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="empty">no LIT trades found in local DB for this account — the DB only covers trades collected since the server started</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = trades.map(t => {
+      const isBuy = t.taker_is_buyer === 1;
+      const mkt = t.market_id === 120 ? 'PERP' : 'SPOT';
+      const counterparty = isBuy ? t.seller_id : t.buyer_id;
+      const bigFlag = t.usd >= 100000
+        ? `<span style="color:${isBuy ? 'var(--green)' : 'var(--red)'};margin-left:4px;font-size:9px">●</span>`
+        : '';
+      return `<tr>
+        <td style="color:var(--ink-faint);font-size:11px">${fmtMYT(t.ts)}</td>
+        <td style="color:var(--ink-faint);font-size:10px">${mkt}</td>
+        <td><span class="pill ${isBuy ? 'buy' : 'sell'}">${isBuy ? 'buy' : 'sell'}</span></td>
+        <td class="num">$${Number(t.price).toFixed(4)}</td>
+        <td class="num">${Number(t.size).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td class="num" style="font-weight:${t.usd >= 100000 ? '700' : '400'}">${fmtUsd(t.usd)}${bigFlag}</td>
+        <td class="num" style="color:var(--ink-faint);font-size:11px">#${counterparty}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty" style="color:var(--red)">error: ${e.message}</td></tr>`;
+  }
+}
+
+// ── search ────────────────────────────────────────────────────
+
+async function doSearch() {
+  const query = $('#searchInput').value.trim();
+  if (!query) return;
+
+  $('#errorBox').style.display = 'none';
+  $('#results').style.display = 'none';
+  $('#loadingBox').style.display = '';
+  $('#searchBtn').disabled = true;
+
+  try {
+    const r = await fetch(`/api/explorer/account?query=${encodeURIComponent(query)}`);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    const data = await r.json();
+    renderAccount(data);
+
+    // switch to positions tab by default
+    $$('.tab').forEach(t => t.classList.remove('active'));
+    $$('.tab-panel').forEach(p => p.classList.remove('active'));
+    $('[data-tab="positions"]').classList.add('active');
+    $('#tab-positions').classList.add('active');
+  } catch (e) {
+    $('#errorBox').textContent = 'Account not found: ' + e.message;
+    $('#errorBox').style.display = '';
+  } finally {
+    $('#loadingBox').style.display = 'none';
+    $('#searchBtn').disabled = false;
+  }
+}
+
+$('#searchBtn').addEventListener('click', doSearch);
+$('#searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+// pre-fill from URL param ?q=
+const urlQ = new URLSearchParams(location.search).get('q');
+if (urlQ) {
+  $('#searchInput').value = urlQ;
+  doSearch();
+}

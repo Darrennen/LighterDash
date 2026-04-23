@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Explorer · Lighter Cockpit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+<style>
+  .nav-pill{padding:4px 12px;border:1px solid var(--line-2);border-radius:3px;color:var(--ink-dim);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;text-decoration:none;transition:all .15s}
+  .nav-pill:hover{border-color:var(--accent);color:var(--ink)}
+
+  .search-wrap{display:flex;gap:8px;align-items:center;max-width:560px}
+  .search-input{flex:1;background:var(--bg);border:1px solid var(--line-2);border-radius:3px;padding:8px 14px;font-family:var(--font-mono);font-size:13px;color:var(--ink);outline:none;transition:border-color .15s}
+  .search-input:focus{border-color:var(--accent)}
+  .search-input::placeholder{color:var(--ink-faint)}
+  .search-btn{padding:8px 18px;background:var(--accent);color:#000;border:none;border-radius:3px;font-family:var(--font-mono);font-size:11px;font-weight:700;letter-spacing:.1em;cursor:pointer;text-transform:uppercase;transition:opacity .15s}
+  .search-btn:hover{opacity:.85}
+  .search-btn:disabled{opacity:.4;cursor:not-allowed}
+
+  .acct-card{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:1px}
+  .acct-card>div{background:var(--panel);padding:14px 18px}
+  .card-lbl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:4px}
+  .card-val{font-size:18px;font-variant-numeric:tabular-nums;font-weight:500}
+
+  .pos-long{color:var(--green)}
+  .pos-short{color:var(--red)}
+  .pnl-pos{color:var(--green)}
+  .pnl-neg{color:var(--red)}
+
+  #errorBox{display:none;padding:14px 18px;background:rgba(255,90,90,0.08);border:1px solid var(--red);border-radius:3px;color:var(--red);font-size:13px;margin-top:12px}
+  #loadingBox{display:none;padding:14px;color:var(--ink-faint);font-size:12px}
+
+  .addr{font-size:11px;color:var(--ink-faint);word-break:break-all;font-variant-numeric:tabular-nums}
+  .ext-link{font-size:10px;color:var(--accent);text-decoration:none;margin-left:8px;letter-spacing:.06em}
+  .ext-link:hover{text-decoration:underline}
+
+  .tab-bar{display:flex;gap:1px;background:var(--line);border-bottom:1px solid var(--line);margin-bottom:0}
+  .tab{padding:8px 16px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;background:var(--panel);color:var(--ink-dim);border:none;font-family:var(--font-mono);transition:color .15s}
+  .tab.active{color:var(--ink);background:var(--bg);border-bottom:2px solid var(--accent)}
+  .tab-panel{display:none}.tab-panel.active{display:block}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <a href="/" class="mark" style="text-decoration:none">lighter</a>
+    <span class="sub">Account Explorer</span>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <a href="/" class="nav-pill">← overview</a>
+    <a href="/lit" class="nav-pill">LIT tracker</a>
+  </div>
+</header>
+
+<section style="padding:24px 0 0">
+  <div style="max-width:800px;margin:0 auto;padding:0 20px">
+    <div style="margin-bottom:20px">
+      <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px">Search Account</div>
+      <div class="search-wrap">
+        <input id="searchInput" class="search-input" type="text"
+          placeholder="Account # (e.g. 8913) or 0x wallet address" autocomplete="off" spellcheck="false" />
+        <button id="searchBtn" class="search-btn">Lookup</button>
+      </div>
+      <div style="font-size:10px;color:var(--ink-faint);margin-top:6px">
+        Enter a numeric account index or an Ethereum wallet address (0x…)
+      </div>
+    </div>
+
+    <div id="loadingBox">Looking up account…</div>
+    <div id="errorBox"></div>
+  </div>
+</section>
+
+<div id="results" style="display:none">
+  <!-- account header -->
+  <div style="padding:0 0 1px">
+    <div style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:18px;font-weight:700" id="acctTitle">—</div>
+        <div class="addr" id="acctAddr">—
+          <a id="acctExtLink" class="ext-link" href="#" target="_blank">open on lighter ↗</a>
+        </div>
+      </div>
+      <div id="acctStatus" style="margin-left:auto"></div>
+    </div>
+  </div>
+
+  <!-- KPI cards -->
+  <div class="acct-card">
+    <div><div class="card-lbl">Portfolio Value</div><div class="card-val" id="cardPortfolio">—</div></div>
+    <div><div class="card-lbl">Collateral</div><div class="card-val" id="cardCollateral">—</div></div>
+    <div><div class="card-lbl">Available Balance</div><div class="card-val" id="cardAvail">—</div></div>
+    <div><div class="card-lbl">Open Orders</div><div class="card-val" id="cardOrders">—</div></div>
+  </div>
+
+  <!-- tab bar -->
+  <div class="tab-bar">
+    <button class="tab active" data-tab="positions">Positions</button>
+    <button class="tab" data-tab="assets">Spot Assets</button>
+    <button class="tab" data-tab="lit-history">LIT History (local DB)</button>
+  </div>
+
+  <!-- positions tab -->
+  <div class="tab-panel active" id="tab-positions">
+    <div class="panel" style="border-top:none">
+      <table id="posTable">
+        <thead>
+          <tr>
+            <th>Market</th>
+            <th>Side</th>
+            <th class="num">Size</th>
+            <th class="num">Avg Entry</th>
+            <th class="num">Position Value</th>
+            <th class="num">Unrealized PnL</th>
+            <th class="num">Liq. Price</th>
+            <th class="num">Funding Paid</th>
+          </tr>
+        </thead>
+        <tbody id="posBody">
+          <tr><td colspan="8" class="empty">no open positions</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- assets tab -->
+  <div class="tab-panel" id="tab-assets">
+    <div class="panel" style="border-top:none">
+      <table id="assetTable">
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th class="num">Balance</th>
+            <th class="num">Locked</th>
+          </tr>
+        </thead>
+        <tbody id="assetBody">
+          <tr><td colspan="3" class="empty">no spot assets</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- lit history tab -->
+  <div class="tab-panel" id="tab-lit-history">
+    <div class="panel" style="border-top:none">
+      <div style="font-size:10px;color:var(--ink-faint);margin-bottom:10px">
+        Trade history from the local LIT DB — only covers trades collected since the server started.
+        Times shown in MYT (UTC+8).
+      </div>
+      <table id="litHistTable">
+        <thead>
+          <tr>
+            <th>Time (MYT)</th>
+            <th>Market</th>
+            <th>Side</th>
+            <th class="num">Price</th>
+            <th class="num">Size</th>
+            <th class="num">USD</th>
+            <th class="num">Counterparty</th>
+          </tr>
+        </thead>
+        <tbody id="litHistBody">
+          <tr><td colspan="7" class="empty">search an account to see their LIT history</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <span>backend · <a href="/docs" target="_blank">/docs</a></span>
+  <span style="color:var(--ink-faint)">·</span>
+  <span>data via mainnet.zklighter.elliot.ai public API</span>
+</footer>
+
+<script type="module" src="/static/explorer.js"></script>
+</body>
+</html>

@@ -233,7 +233,12 @@ function renderLeaders(data, actualHours) {
     return `<tr class="leader-row" data-id="${item.account_id}" data-role="${role}"
                style="cursor:pointer" title="Click to see trade timeline">
       <td class="rank">${rank}</td>
-      <td class="acct" style="font-size:12px">${fmtAcct(item.account_id)}</td>
+      <td class="acct" style="font-size:12px">
+        ${fmtAcct(item.account_id)}
+        <a href="/explorer?q=${item.account_id}" target="_blank"
+           style="color:var(--accent);font-size:9px;margin-left:4px;text-decoration:none"
+           onclick="event.stopPropagation()" title="Open in Explorer">↗</a>
+      </td>
       <td class="num">${fmtUsd(item.total_usd)}</td>
       <td class="num">${Number(item.trade_count).toLocaleString()}</td>
       <td class="num" style="color:var(--ink-dim)">${fmtUsd(avg)}</td>

@@ -68,6 +68,15 @@ class LighterClient:
             return []
         return j.get("trades") or j.get("recent_trades") or j.get("data") or []
 
+    async def account(self, by: str = "index", value: str = "") -> dict:
+        try:
+            j = await self._get("/account", params={"by": by, "value": value})
+        except httpx.HTTPError as e:
+            log.debug("account(%s=%s) failed: %s", by, value, e)
+            return {}
+        accounts = j.get("accounts") or []
+        return accounts[0] if accounts else {}
+
     async def candles(
         self, market_id: int, resolution: str = "1h", count: int = 24
     ) -> list[dict]:
