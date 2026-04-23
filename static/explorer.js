@@ -34,6 +34,7 @@ $$('.tab').forEach(tab => {
     if (tab.dataset.tab === 'lit-history' && _currentAccountIndex != null) {
       loadLitHistory(_currentAccountIndex);
     }
+    // lit-staking is pre-rendered on load, no lazy fetch needed
   });
 });
 
@@ -57,7 +58,11 @@ function renderAccount(data) {
 
   const statusLabel = data.status === 1 ? '● Active' : '○ Inactive';
   const statusColor = data.status === 1 ? 'var(--green)' : 'var(--ink-faint)';
-  $('#acctStatus').innerHTML = `<span style="color:${statusColor};font-size:12px">${statusLabel}</span>`;
+  const staking = data.lit_staking || {};
+  const stakingBadge = staking.is_staking
+    ? `<span style="margin-left:10px;padding:2px 8px;border:1px solid var(--accent);border-radius:2px;font-size:10px;letter-spacing:.1em;color:var(--accent)">LIT STAKING</span>`
+    : '';
+  $('#acctStatus').innerHTML = `<span style="color:${statusColor};font-size:12px">${statusLabel}</span>${stakingBadge}`;
 
   $('#cardPortfolio').textContent = fmtUsd(parseFloat(data.total_asset_value));
   $('#cardCollateral').textContent = fmtUsd(parseFloat(data.collateral));
@@ -66,6 +71,7 @@ function renderAccount(data) {
 
   renderPositions(data.positions || []);
   renderAssets(data.assets || []);
+  renderLitStaking(data.lit_staking || {});
 
   // reset LIT history tab
   $('#litHistBody').innerHTML = `<tr><td colspan="7" class="empty">click the "LIT History" tab to load</td></tr>`;
@@ -120,6 +126,77 @@ function renderAssets(assets) {
       <td class="num" style="color:${locked > 0 ? 'var(--amber)' : 'var(--ink-faint)'}">${locked > 0 ? fmtNum(locked, 6) : '—'}</td>
     </tr>`;
   }).join('');
+}
+
+function renderLitStaking(s) {
+  const el = $('#litStakingPanel');
+
+  const freeBalance = s.lit_free_balance || 0;
+  const isStaking   = s.is_staking || false;
+  const stakedUsd   = s.staked_usdc_value || 0;
+  const shares      = s.shares_amount || 0;
+  const entryUsdc   = s.entry_usdc || 0;
+  const unlocks     = s.pending_unlocks || [];
+
+  const pnl = stakedUsd - entryUsdc;
+  const pnlCls  = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+  const pnlSign = pnl >= 0 ? '+' : '';
+
+  const stakingStatus = isStaking
+    ? `<span style="color:var(--green);font-size:20px;font-weight:700">● Staking</span>`
+    : `<span style="color:var(--ink-faint);font-size:20px">○ Not staking</span>`;
+
+  const stakedBlock = isStaking ? `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-top:14px">
+      <div style="background:var(--bg);padding:14px 18px">
+        <div class="card-lbl">Staked Value (USDC)</div>
+        <div class="card-val" style="color:var(--green)">${fmtUsd(stakedUsd)}</div>
+      </div>
+      <div style="background:var(--bg);padding:14px 18px">
+        <div class="card-lbl">Entry Value (USDC)</div>
+        <div class="card-val">${entryUsdc > 0 ? fmtUsd(entryUsdc) : '—'}</div>
+      </div>
+      <div style="background:var(--bg);padding:14px 18px">
+        <div class="card-lbl">Staking PnL</div>
+        <div class="card-val ${pnlCls}">${entryUsdc > 0 ? pnlSign + fmtUsd(pnl) : '—'}</div>
+      </div>
+      <div style="background:var(--bg);padding:14px 18px">
+        <div class="card-lbl">Shares Held</div>
+        <div class="card-val">${Number(shares).toLocaleString()}</div>
+      </div>
+    </div>` : '';
+
+  const unlocksBlock = unlocks.length ? `
+    <div style="margin-top:14px">
+      <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--amber);margin-bottom:6px">
+        ⚠ Pending Unstake Requests
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr>
+          <th style="text-align:left;font-size:10px;color:var(--ink-faint);padding:4px 8px">Amount</th>
+          <th style="text-align:right;font-size:10px;color:var(--ink-faint);padding:4px 8px">Unlock Time</th>
+        </tr></thead>
+        <tbody>${unlocks.map(u => `<tr>
+          <td style="padding:4px 8px;font-variant-numeric:tabular-nums">${fmtUsd(parseFloat(u.usdc_amount || u.amount || 0))}</td>
+          <td style="padding:4px 8px;text-align:right;color:var(--amber);font-size:11px">${u.unlock_time ? fmtMYT(u.unlock_time) + ' MYT' : '—'}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : '';
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:4px">
+      <div>${stakingStatus}</div>
+      <div style="margin-left:auto">
+        <div class="card-lbl">LIT Spot (free / unstaked)</div>
+        <div style="font-size:18px;font-variant-numeric:tabular-nums;font-weight:500">
+          ${freeBalance > 0 ? Number(freeBalance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' LIT' : '—'}
+        </div>
+      </div>
+    </div>
+    ${stakedBlock}
+    ${unlocksBlock}
+    ${!isStaking && freeBalance === 0 ? `<div style="margin-top:14px;color:var(--ink-faint);font-size:12px">This account holds no LIT tokens and is not staking.</div>` : ''}
+  `;
 }
 
 async function loadLitHistory(accountIndex) {
