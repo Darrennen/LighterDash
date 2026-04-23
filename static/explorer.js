@@ -14,10 +14,13 @@ const fmtUsd = n => {
   return sign + '$' + abs.toFixed(2);
 };
 const fmtNum = (n, dp = 4) => n == null ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
-const fmtMYT = ts => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleString('en-MY', {
-  timeZone: 'Asia/Kuala_Lumpur', hour12: false,
-  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
-});
+const fmtMYT = ts => {
+  const d = typeof ts === 'string' ? new Date(ts) : new Date(ts > 1e12 ? ts : ts * 1000);
+  return d.toLocaleString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur', hour12: false,
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+};
 const truncAddr = a => a ? a.slice(0, 6) + '…' + a.slice(-4) : '—';
 
 let _currentAccountIndex = null;
@@ -31,8 +34,8 @@ $$('.tab').forEach(tab => {
     tab.classList.add('active');
     $(`#tab-${tab.dataset.tab}`).classList.add('active');
 
-    if (tab.dataset.tab === 'lit-history' && _currentAccountIndex != null) {
-      loadLitHistory(_currentAccountIndex);
+    if (tab.dataset.tab === 'lit-history' && _histAddress) {
+      loadHistory(_histOffset);
     }
     // lit-staking is pre-rendered on load, no lazy fetch needed
   });
@@ -73,8 +76,14 @@ function renderAccount(data) {
   renderAssets(data.assets || []);
   renderLitStaking(data.lit_staking || {});
 
-  // reset LIT history tab
-  $('#litHistBody').innerHTML = `<tr><td colspan="7" class="empty">click the "LIT History" tab to load</td></tr>`;
+  // prime history state — loads on tab click
+  _histAddress = data.l1_address || '';
+  _histAccountIndex = idx;
+  _histOffset = 0;
+  $('#litHistBody').innerHTML = `<tr><td colspan="7" class="empty">click the "Trade History" tab to load</td></tr>`;
+  $('#histPrevBtn').style.display = 'none';
+  $('#histNextBtn').style.display = 'none';
+  $('#histPageInfo').textContent = '';
 }
 
 function renderPositions(positions) {
@@ -199,54 +208,93 @@ function renderLitStaking(s) {
   `;
 }
 
-async function loadLitHistory(accountIndex) {
+const HIST_PAGE = 100;
+let _histOffset = 0;
+let _histMarket = '';
+let _histAddress = '';
+let _histAccountIndex = null;
+
+async function loadHistory(offset = 0) {
+  _histOffset = offset;
   const tbody = $('#litHistBody');
   tbody.innerHTML = `<tr><td colspan="7" class="empty">loading…</td></tr>`;
+  $('#histPrevBtn').style.display = 'none';
+  $('#histNextBtn').style.display = 'none';
+  $('#histPageInfo').textContent = '';
+
+  if (!_histAddress) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">search an account to see their trade history</td></tr>`;
+    return;
+  }
 
   try {
-    // fetch both buyer and seller history and merge
-    const [buyerRes, sellerRes] = await Promise.all([
-      fetch(`/api/lit/account?account_id=${accountIndex}&hours=720&role=buyer`).then(r => r.json()),
-      fetch(`/api/lit/account?account_id=${accountIndex}&hours=720&role=seller`).then(r => r.json()),
-    ]);
+    const mq = _histMarket ? `&market_id=${_histMarket}` : '';
+    // fetch slightly more than page size to know if there's a next page
+    const res = await fetch(
+      `/api/explorer/history?address=${encodeURIComponent(_histAddress)}&account_index=${_histAccountIndex}&limit=${HIST_PAGE + 1}&offset=${offset}${mq}`
+    ).then(r => r.json());
 
-    const allTrades = [
-      ...(buyerRes.trades || []),
-      ...(sellerRes.trades || []),
-    ];
-
-    // deduplicate by trade_id and sort newest first
-    const seen = new Set();
-    const trades = allTrades
-      .filter(t => { if (seen.has(t.trade_id)) return false; seen.add(t.trade_id); return true; })
-      .sort((a, b) => b.ts - a.ts);
+    const all = res.trades || [];
+    const hasNext = all.length > HIST_PAGE;
+    const trades = all.slice(0, HIST_PAGE);
 
     if (!trades.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty">no LIT trades found in local DB for this account — the DB only covers trades collected since the server started</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="empty">no trades found${_histMarket ? ' for this market filter' : ''} at this offset</td></tr>`;
+      if (offset > 0) {
+        $('#histPrevBtn').style.display = '';
+      }
       return;
     }
 
+    const mktName = id => id === 120 ? 'LIT PERP' : id === 2049 ? 'LIT SPOT' : `#${id}`;
+
     tbody.innerHTML = trades.map(t => {
       const isBuy = t.taker_is_buyer === 1;
-      const mkt = t.market_id === 120 ? 'PERP' : 'SPOT';
-      const counterparty = isBuy ? t.seller_id : t.buyer_id;
-      const bigFlag = t.usd >= 100000
+      const counterparty = t.role === 'taker' ? t.maker_account_index : t.taker_account_index;
+      const price = parseFloat(t.price || 0);
+      const size  = parseFloat(t.size  || 0);
+      const usd   = price * size;
+      const bigFlag = usd >= 100000
         ? `<span style="color:${isBuy ? 'var(--green)' : 'var(--red)'};margin-left:4px;font-size:9px">●</span>`
         : '';
+      const rolePill = t.role === 'maker'
+        ? `<span style="font-size:9px;padding:1px 5px;border:1px solid var(--line-2);border-radius:2px;color:var(--ink-faint)">maker</span>`
+        : `<span style="font-size:9px;padding:1px 5px;border:1px solid var(--accent);border-radius:2px;color:var(--accent)">taker</span>`;
       return `<tr>
-        <td style="color:var(--ink-faint);font-size:11px">${fmtMYT(t.ts)}</td>
-        <td style="color:var(--ink-faint);font-size:10px">${mkt}</td>
-        <td><span class="pill ${isBuy ? 'buy' : 'sell'}">${isBuy ? 'buy' : 'sell'}</span></td>
-        <td class="num">$${Number(t.price).toFixed(4)}</td>
-        <td class="num">${Number(t.size).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td class="num" style="font-weight:${t.usd >= 100000 ? '700' : '400'}">${fmtUsd(t.usd)}${bigFlag}</td>
-        <td class="num" style="color:var(--ink-faint);font-size:11px">#${counterparty}</td>
+        <td style="color:var(--ink-faint);font-size:11px">${fmtMYT(t.time)}</td>
+        <td style="color:var(--ink-faint);font-size:10px">${mktName(t.market_id)}</td>
+        <td><span class="pill ${isBuy ? 'buy' : 'sell'}">${isBuy ? 'buy' : 'sell'}</span>${bigFlag}</td>
+        <td>${rolePill}</td>
+        <td class="num">$${price.toFixed(4)}</td>
+        <td class="num">${size.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td class="num" style="color:var(--ink-faint);font-size:11px">
+          <a href="/explorer?q=${counterparty}" target="_blank"
+             style="color:var(--ink-faint);text-decoration:none" title="Open in explorer">#${counterparty} ↗</a>
+        </td>
       </tr>`;
     }).join('');
+
+    const page = Math.floor(offset / HIST_PAGE) + 1;
+    $('#histPageInfo').textContent = `page ${page} · showing ${offset + 1}–${offset + trades.length}`;
+    if (offset > 0) $('#histPrevBtn').style.display = '';
+    if (hasNext)    $('#histNextBtn').style.display = '';
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="7" class="empty" style="color:var(--red)">error: ${e.message}</td></tr>`;
   }
 }
+
+// wire history market filter buttons
+$$('[data-hist-market]').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('[data-hist-market]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    _histMarket = b.dataset.histMarket;
+    loadHistory(0);
+  });
+});
+
+$('#histPrevBtn').addEventListener('click', () => loadHistory(Math.max(0, _histOffset - HIST_PAGE)));
+$('#histNextBtn').addEventListener('click', () => loadHistory(_histOffset + HIST_PAGE));
 
 // ── search ────────────────────────────────────────────────────
 

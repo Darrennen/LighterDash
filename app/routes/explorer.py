@@ -7,8 +7,67 @@ from app.services.lighter_client import client
 
 router = APIRouter()
 
+_LIT_MARKETS = {120, 2049}
+
+
+def _parse_log(entry: dict, account_index: int) -> dict | None:
+    """Normalise a raw explorer log entry into a flat trade dict."""
+    pubdata = entry.get("pubdata") or {}
+    trade = pubdata.get("trade_pubdata") or pubdata.get("trade_pubdata_with_funding")
+    if not trade:
+        return None
+    mkt = trade.get("market_index")
+    taker_idx = int(trade.get("taker_account_index") or 0)
+    maker_idx  = int(trade.get("maker_account_index") or 0)
+    is_taker_ask = int(trade.get("is_taker_ask") or 0)
+
+    # Determine this account's side
+    if taker_idx == account_index:
+        # account is taker: taker_ask=1 means sold, taker_ask=0 means bought
+        taker_is_buyer = 0 if is_taker_ask else 1
+        role = "taker"
+    elif maker_idx == account_index:
+        # account is maker (passive): opposite of taker
+        taker_is_buyer = 1 if is_taker_ask else 0
+        role = "maker"
+    else:
+        return None
+
+    return {
+        "hash": entry.get("hash", ""),
+        "time": entry.get("time", ""),
+        "market_id": mkt,
+        "price": trade.get("price"),
+        "size": trade.get("size"),
+        "taker_is_buyer": taker_is_buyer,
+        "taker_account_index": taker_idx,
+        "maker_account_index": maker_idx,
+        "role": role,
+    }
+
 # System-reserved pool index for the LIT staking pool
 _LIT_STAKING_POOL = 281_474_976_710_654
+
+
+@router.get("/history")
+async def account_history(
+    address: str = Query(..., description="0x wallet address"),
+    account_index: int = Query(..., description="Numeric account index"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    market_id: int | None = None,
+):
+    """Full trade history from explorer.elliot.ai (months of data, no auth)."""
+    logs = await client.account_logs(address=address, limit=limit, offset=offset)
+    trades = []
+    for entry in logs:
+        t = _parse_log(entry, account_index)
+        if t is None:
+            continue
+        if market_id is not None and t["market_id"] != market_id:
+            continue
+        trades.append(t)
+    return {"trades": trades, "count": len(trades), "offset": offset, "limit": limit}
 
 
 @router.get("/account")

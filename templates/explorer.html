@@ -102,7 +102,7 @@
     <button class="tab active" data-tab="positions">Positions</button>
     <button class="tab" data-tab="assets">Spot Assets</button>
     <button class="tab" data-tab="lit-staking">LIT Staking</button>
-    <button class="tab" data-tab="lit-history">LIT History (local DB)</button>
+    <button class="tab" data-tab="lit-history">Trade History</button>
   </div>
 
   <!-- positions tab -->
@@ -153,12 +153,19 @@
     </div>
   </div>
 
-  <!-- lit history tab -->
+  <!-- trade history tab -->
   <div class="tab-panel" id="tab-lit-history">
     <div class="panel" style="border-top:none">
-      <div style="font-size:10px;color:var(--ink-faint);margin-bottom:10px">
-        Trade history from the local LIT DB — only covers trades collected since the server started.
-        Times shown in MYT (UTC+8).
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+        <div style="font-size:10px;color:var(--ink-faint)">
+          Full on-chain history · MYT (UTC+8)
+        </div>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+          <span style="font-size:10px;color:var(--ink-faint);letter-spacing:.08em">MARKET</span>
+          <button class="btn active" data-hist-market="">ALL</button>
+          <button class="btn" data-hist-market="120">LIT PERP</button>
+          <button class="btn" data-hist-market="2049">LIT SPOT</button>
+        </div>
       </div>
       <table id="litHistTable">
         <thead>
@@ -166,16 +173,21 @@
             <th>Time (MYT)</th>
             <th>Market</th>
             <th>Side</th>
+            <th>Role</th>
             <th class="num">Price</th>
             <th class="num">Size</th>
-            <th class="num">USD</th>
             <th class="num">Counterparty</th>
           </tr>
         </thead>
         <tbody id="litHistBody">
-          <tr><td colspan="7" class="empty">search an account to see their LIT history</td></tr>
+          <tr><td colspan="7" class="empty">search an account to see their trade history</td></tr>
         </tbody>
       </table>
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+        <button id="histPrevBtn" class="btn" style="display:none">← prev</button>
+        <span id="histPageInfo" style="font-size:10px;color:var(--ink-faint)"></span>
+        <button id="histNextBtn" class="btn" style="display:none">next →</button>
+      </div>
     </div>
   </div>
 </div>

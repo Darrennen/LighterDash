@@ -14,9 +14,13 @@ from app.config import settings
 log = logging.getLogger("lighter.client")
 
 
+EXPLORER_API = "https://explorer.elliot.ai/api"
+
+
 class LighterClient:
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
+        self._explorer: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -27,9 +31,20 @@ class LighterClient:
             )
         return self._client
 
+    async def _get_explorer(self) -> httpx.AsyncClient:
+        if self._explorer is None or self._explorer.is_closed:
+            self._explorer = httpx.AsyncClient(
+                base_url=EXPLORER_API,
+                timeout=settings.HTTP_TIMEOUT,
+                headers={"Accept": "application/json", "User-Agent": "lighter-cockpit/0.1"},
+            )
+        return self._explorer
+
     async def close(self) -> None:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
+        if self._explorer and not self._explorer.is_closed:
+            await self._explorer.aclose()
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict:
         client = await self._get_client()
@@ -67,6 +82,22 @@ class LighterClient:
             log.debug("recentTrades(%s) failed: %s", market_id, e)
             return []
         return j.get("trades") or j.get("recent_trades") or j.get("data") or []
+
+    async def account_logs(
+        self, address: str, limit: int = 100, offset: int = 0
+    ) -> list[dict]:
+        """Full transaction history from the Lighter explorer index (no auth needed)."""
+        try:
+            ex = await self._get_explorer()
+            r = await ex.get(
+                f"/accounts/{address}/logs",
+                params={"limit": limit, "offset": offset},
+            )
+            r.raise_for_status()
+            return r.json() or []
+        except httpx.HTTPError as e:
+            log.debug("account_logs(%s) failed: %s", address, e)
+            return []
 
     async def account(self, by: str = "index", value: str = "") -> dict:
         try:
