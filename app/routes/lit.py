@@ -147,6 +147,19 @@ async def account_flow(
     )
 
 
+def _log_entry_ts_ms(entry: dict) -> int:
+    """Parse explorer log entry time → epoch ms."""
+    from datetime import datetime
+    try:
+        return int(
+            datetime.fromisoformat(
+                (entry.get("time") or "").replace("Z", "+00:00")
+            ).timestamp() * 1000
+        )
+    except Exception:
+        return 0
+
+
 @router.get("/account-flow-live")
 async def account_flow_live(
     account_id: int,
@@ -165,24 +178,35 @@ async def account_flow_live(
 
     mid_filter = _market_filter(market_id)
     now_ms = int(time.time() * 1000)
-    cutoff_ms = now_ms - 30 * 24 * 3_600_000  # only need 30d
+    cutoff_ms = now_ms - 30 * 24 * 3_600_000
 
     trades: list[dict] = []
+    BATCH = 3   # pages fetched concurrently
+    MAX_PAGES = 30
+
     offset = 0
-    while True:
-        logs = await client.account_logs(address=address, limit=100, offset=offset)
-        if not logs:
-            break
-        for entry in logs:
-            t = _parse_explorer_lit_trade(entry)
-            if t and (mid_filter is None or t["market_id"] == mid_filter):
-                trades.append(t)
-        # logs are newest-first; stop once we're past 30 days
-        oldest_ts = trades[-1]["ts"] if trades else cutoff_ms - 1
-        if oldest_ts < cutoff_ms or len(logs) < 100:
-            break
-        offset += 100
-        await asyncio.sleep(0.08)
+    done = False
+    while not done and offset < MAX_PAGES * 100:
+        # fetch BATCH pages in parallel
+        page_offsets = list(range(offset, min(offset + BATCH * 100, MAX_PAGES * 100), 100))
+        results = await asyncio.gather(
+            *(client.account_logs(address=address, limit=100, offset=o) for o in page_offsets),
+            return_exceptions=True,
+        )
+        for logs in results:
+            if isinstance(logs, Exception) or not logs:
+                done = True
+                break
+            for entry in logs:
+                t = _parse_explorer_lit_trade(entry)
+                if t and (mid_filter is None or t["market_id"] == mid_filter):
+                    trades.append(t)
+            # stop when the oldest log on this page predates our 30d cutoff
+            oldest_in_page = min((_log_entry_ts_ms(e) for e in logs), default=0)
+            if oldest_in_page < cutoff_ms or len(logs) < 100:
+                done = True
+                break
+        offset += BATCH * 100
 
     windows = {"24h": 24, "7d": 168, "30d": 720}
     result: dict = {}
