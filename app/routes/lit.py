@@ -213,14 +213,20 @@ async def account_flow_live(
     for label, hours in windows.items():
         since_ms = now_ms - hours * 3_600_000
         w = [t for t in trades if t["ts"] >= since_ms]
-        buy_usd  = sum(t["usd"] for t in w if t["buyer_id"]  == account_id)
-        sell_usd = sum(t["usd"] for t in w if t["seller_id"] == account_id)
+        buys  = [t for t in w if t["buyer_id"]  == account_id]
+        sells = [t for t in w if t["seller_id"] == account_id]
+        buy_usd   = sum(t["usd"]  for t in buys)
+        buy_size  = sum(t["size"] for t in buys)
+        sell_usd  = sum(t["usd"]  for t in sells)
+        sell_size = sum(t["size"] for t in sells)
         result[label] = {
-            "buy_usd":    buy_usd,
-            "buy_trades": sum(1 for t in w if t["buyer_id"]  == account_id),
-            "sell_usd":   sell_usd,
-            "sell_trades":sum(1 for t in w if t["seller_id"] == account_id),
-            "net_usd":    buy_usd - sell_usd,
+            "buy_usd":       buy_usd,
+            "buy_trades":    len(buys),
+            "buy_avg_price": buy_usd  / buy_size  if buy_size  > 0 else None,
+            "sell_usd":      sell_usd,
+            "sell_trades":   len(sells),
+            "sell_avg_price":sell_usd / sell_size if sell_size > 0 else None,
+            "net_usd":       buy_usd - sell_usd,
         }
     return result
 

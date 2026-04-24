@@ -392,11 +392,13 @@ function renderLitFlow(data) {
           <div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);margin-bottom:3px">Buy</div>
           <div style="font-size:16px;font-weight:600;color:var(--green);font-variant-numeric:tabular-nums">${fmtUsd(buy)}</div>
           <div style="font-size:10px;color:var(--ink-faint);margin-top:2px">${buyT} trade${buyT !== 1 ? 's' : ''}</div>
+          ${d.buy_avg_price != null ? `<div style="font-size:10px;color:var(--ink-dim);margin-top:3px">avg $${Number(d.buy_avg_price).toFixed(4)}</div>` : ''}
         </div>
         <div>
           <div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--red);margin-bottom:3px">Sell</div>
           <div style="font-size:16px;font-weight:600;color:var(--red);font-variant-numeric:tabular-nums">${fmtUsd(sell)}</div>
           <div style="font-size:10px;color:var(--ink-faint);margin-top:2px">${sellT} trade${sellT !== 1 ? 's' : ''}</div>
+          ${d.sell_avg_price != null ? `<div style="font-size:10px;color:var(--ink-dim);margin-top:3px">avg $${Number(d.sell_avg_price).toFixed(4)}</div>` : ''}
         </div>
       </div>
       <div style="height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-bottom:8px">
