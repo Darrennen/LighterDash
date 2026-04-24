@@ -11,6 +11,7 @@ from app.db import (
     fetch_all_lit_account_ids,
     fetch_backfill_status,
     fetch_backfilled_ids,
+    fetch_lit_account_flow,
     fetch_lit_account_trades,
     fetch_lit_flow,
     fetch_lit_leaders,
@@ -132,6 +133,17 @@ async def flow(
 ):
     await _maybe_refresh()
     return await fetch_lit_flow(hours=hours, market_id=_market_filter(market_id))
+
+
+@router.get("/account-flow")
+async def account_flow(
+    account_id: int,
+    market_id: int | None = None,
+):
+    await _maybe_refresh()
+    return await fetch_lit_account_flow(
+        account_id=account_id, market_id=_market_filter(market_id)
+    )
 
 
 @router.get("/account")

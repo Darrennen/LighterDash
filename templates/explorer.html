@@ -102,6 +102,7 @@
     <button class="tab active" data-tab="positions">Positions</button>
     <button class="tab" data-tab="assets">Spot Assets</button>
     <button class="tab" data-tab="lit-staking">LIT Staking</button>
+    <button class="tab" data-tab="lit-flow">LIT Flow</button>
     <button class="tab" data-tab="lit-history">Trade History</button>
   </div>
 
@@ -151,6 +152,22 @@
   <div class="tab-panel" id="tab-lit-staking">
     <div class="panel" style="border-top:none" id="litStakingPanel">
       <div style="color:var(--ink-faint);font-size:12px">search an account to see LIT staking status</div>
+    </div>
+  </div>
+
+  <!-- lit flow tab -->
+  <div class="tab-panel" id="tab-lit-flow">
+    <div class="panel" style="border-top:none">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+        <span style="font-size:10px;color:var(--ink-faint);letter-spacing:.08em">MARKET</span>
+        <button class="btn active" data-flow-market="">ALL</button>
+        <button class="btn" data-flow-market="120">LIT PERP</button>
+        <button class="btn" data-flow-market="2049">LIT SPOT</button>
+        <span id="flowLoadingMsg" style="margin-left:auto;font-size:10px;color:var(--ink-faint)"></span>
+      </div>
+      <div id="litFlowGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)">
+        <div style="background:var(--bg);padding:20px;color:var(--ink-faint);font-size:11px;grid-column:1/-1">search an account to see LIT flow</div>
+      </div>
     </div>
   </div>
 

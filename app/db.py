@@ -289,6 +289,45 @@ async def fetch_backfill_status() -> dict[str, Any]:
     return {"accounts_known": known, "accounts_backfilled": done, "trades_found": total_found}
 
 
+async def fetch_lit_account_flow(
+    account_id: int, market_id: int | None = None
+) -> dict[str, Any]:
+    """Buy/sell aggregates for one account across 24h, 7d, 30d windows."""
+    now_ms = int(time.time() * 1000)
+    windows = {"24h": 24, "7d": 168, "30d": 720}
+    mkt_clause = " AND market_id = ?" if market_id is not None else ""
+
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        result: dict[str, Any] = {}
+        for label, hours in windows.items():
+            since_ms = now_ms - hours * 3_600_000
+            params_b = [since_ms, account_id] + ([market_id] if market_id else [])
+            params_s = [since_ms, account_id] + ([market_id] if market_id else [])
+            cur = await db.execute(
+                f"""SELECT
+                    COALESCE(SUM(CASE WHEN buyer_id=? THEN usd ELSE 0 END),0),
+                    COUNT(CASE WHEN buyer_id=? THEN 1 END),
+                    COALESCE(SUM(CASE WHEN seller_id=? THEN usd ELSE 0 END),0),
+                    COUNT(CASE WHEN seller_id=? THEN 1 END)
+                FROM lit_trades
+                WHERE ts >= ?
+                  AND (buyer_id=? OR seller_id=?){mkt_clause}""",
+                [account_id, account_id, account_id, account_id,
+                 since_ms, account_id, account_id]
+                + ([market_id] if market_id else []),
+            )
+            row = await cur.fetchone()
+            buy_usd, buy_cnt, sell_usd, sell_cnt = row or (0, 0, 0, 0)
+            result[label] = {
+                "buy_usd": buy_usd or 0.0,
+                "buy_trades": buy_cnt or 0,
+                "sell_usd": sell_usd or 0.0,
+                "sell_trades": sell_cnt or 0,
+                "net_usd": (buy_usd or 0.0) - (sell_usd or 0.0),
+            }
+    return result
+
+
 async def fetch_lit_account_trades(
     account_id: int, hours: int = 24, role: str = "buyer",
     market_id: int | None = None,

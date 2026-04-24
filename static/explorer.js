@@ -37,7 +37,9 @@ $$('.tab').forEach(tab => {
     if (tab.dataset.tab === 'lit-history' && _histAddress) {
       loadHistory(_histOffset);
     }
-    // lit-staking is pre-rendered on load, no lazy fetch needed
+    if (tab.dataset.tab === 'lit-flow' && _currentAccountIndex) {
+      loadLitFlow(_currentAccountIndex);
+    }
   });
 });
 
@@ -328,6 +330,88 @@ $$('[data-hist-market]').forEach(b => {
 
 $('#histPrevBtn').addEventListener('click', () => loadHistory(Math.max(0, _histOffset - HIST_PAGE)));
 $('#histNextBtn').addEventListener('click', () => loadHistory(_histOffset + HIST_PAGE));
+
+// ── LIT flow overview ─────────────────────────────────────────
+
+let _flowMarket = '';
+let _flowData = null;
+
+$$('[data-flow-market]').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('[data-flow-market]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    _flowMarket = b.dataset.flowMarket;
+    if (_currentAccountIndex) loadLitFlow(_currentAccountIndex);
+  });
+});
+
+async function loadLitFlow(accountId) {
+  const grid = $('#litFlowGrid');
+  const msg = $('#flowLoadingMsg');
+  if (!grid) return;
+  grid.innerHTML = `<div style="background:var(--bg);padding:20px;color:var(--ink-faint);font-size:11px;grid-column:1/-1">loading…</div>`;
+  if (msg) msg.textContent = 'fetching…';
+
+  try {
+    const mq = _flowMarket ? `&market_id=${_flowMarket}` : '';
+    _flowData = await fetch(`/api/lit/account-flow?account_id=${accountId}${mq}`)
+      .then(r => r.ok ? r.json() : Promise.reject(r.status));
+    renderLitFlow(_flowData);
+    if (msg) msg.textContent = '';
+  } catch (e) {
+    grid.innerHTML = `<div style="background:var(--bg);padding:20px;color:var(--red);font-size:11px;grid-column:1/-1">failed to load flow data</div>`;
+    if (msg) msg.textContent = '';
+  }
+}
+
+function renderLitFlow(data) {
+  const grid = $('#litFlowGrid');
+  if (!grid || !data) return;
+
+  const periods = ['24h', '7d', '30d'];
+  const labels = { '24h': '24 Hours', '7d': '7 Days', '30d': '30 Days' };
+
+  grid.innerHTML = periods.map(p => {
+    const d = data[p] || {};
+    const buy = d.buy_usd || 0;
+    const sell = d.sell_usd || 0;
+    const net = d.net_usd || 0;
+    const buyT = d.buy_trades || 0;
+    const sellT = d.sell_trades || 0;
+    const total = buy + sell || 1;
+    const buyPct = (buy / total * 100).toFixed(1);
+    const sellPct = (100 - buyPct).toFixed(1);
+    const netCls = net >= 0 ? 'color:var(--green)' : 'color:var(--red)';
+    const noData = buy === 0 && sell === 0;
+
+    return `<div style="background:var(--bg);padding:18px">
+      <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:12px">${labels[p]}</div>
+      ${noData ? `<div style="color:var(--ink-faint);font-size:11px">no LIT trades in DB for this window</div>` : `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);margin-bottom:3px">Buy</div>
+          <div style="font-size:16px;font-weight:600;color:var(--green);font-variant-numeric:tabular-nums">${fmtUsd(buy)}</div>
+          <div style="font-size:10px;color:var(--ink-faint);margin-top:2px">${buyT} trade${buyT !== 1 ? 's' : ''}</div>
+        </div>
+        <div>
+          <div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--red);margin-bottom:3px">Sell</div>
+          <div style="font-size:16px;font-weight:600;color:var(--red);font-variant-numeric:tabular-nums">${fmtUsd(sell)}</div>
+          <div style="font-size:10px;color:var(--ink-faint);margin-top:2px">${sellT} trade${sellT !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+      <div style="height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-bottom:8px">
+        <div style="height:100%;width:${buyPct}%;background:var(--green);border-radius:2px;display:inline-block"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-bottom:10px">
+        <span>${buyPct}% buy</span><span>${sellPct}% sell</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-faint)">Net</span>
+        <span style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;${netCls}">${net >= 0 ? '+' : ''}${fmtUsd(net)}</span>
+      </div>`}
+    </div>`;
+  }).join('');
+}
 
 // ── search ────────────────────────────────────────────────────
 
