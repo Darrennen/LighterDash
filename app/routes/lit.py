@@ -19,10 +19,9 @@ from app.db import (
     fetch_lit_top_accounts,
     fetch_lit_trades,
     init_db,
-    mark_backfilled,
 )
 from app.services.collector import (
-    _backfill_single_account,
+    _parse_explorer_lit_trade,
     backfill_account_histories,
     backfill_lit_once,
     collect_lit_once,
@@ -148,20 +147,58 @@ async def account_flow(
     )
 
 
-@router.get("/sync-account")
-async def sync_account(account_id: int):
-    """Fetch full LIT trade history for one account from the explorer and store it."""
-    await _maybe_refresh()
-    try:
-        data = await client.account(by="index", value=str(account_id))
-        addr = data.get("l1_address", "")
-    except Exception:
-        addr = ""
-    if not addr:
+@router.get("/account-flow-live")
+async def account_flow_live(
+    account_id: int,
+    address: str = Query(""),
+    market_id: int | None = None,
+):
+    """Compute LIT buy/sell flow directly from explorer logs — no local DB needed."""
+    if not address:
+        try:
+            data = await client.account(by="index", value=str(account_id))
+            address = data.get("l1_address", "")
+        except Exception:
+            address = ""
+    if not address:
         raise HTTPException(status_code=404, detail="Account address not found")
-    n = await _backfill_single_account(account_id, addr)
-    await mark_backfilled(account_id, addr, n)
-    return {"account_id": account_id, "trades_synced": n}
+
+    mid_filter = _market_filter(market_id)
+    now_ms = int(time.time() * 1000)
+    cutoff_ms = now_ms - 30 * 24 * 3_600_000  # only need 30d
+
+    trades: list[dict] = []
+    offset = 0
+    while True:
+        logs = await client.account_logs(address=address, limit=100, offset=offset)
+        if not logs:
+            break
+        for entry in logs:
+            t = _parse_explorer_lit_trade(entry)
+            if t and (mid_filter is None or t["market_id"] == mid_filter):
+                trades.append(t)
+        # logs are newest-first; stop once we're past 30 days
+        oldest_ts = trades[-1]["ts"] if trades else cutoff_ms - 1
+        if oldest_ts < cutoff_ms or len(logs) < 100:
+            break
+        offset += 100
+        await asyncio.sleep(0.08)
+
+    windows = {"24h": 24, "7d": 168, "30d": 720}
+    result: dict = {}
+    for label, hours in windows.items():
+        since_ms = now_ms - hours * 3_600_000
+        w = [t for t in trades if t["ts"] >= since_ms]
+        buy_usd  = sum(t["usd"] for t in w if t["buyer_id"]  == account_id)
+        sell_usd = sum(t["usd"] for t in w if t["seller_id"] == account_id)
+        result[label] = {
+            "buy_usd":    buy_usd,
+            "buy_trades": sum(1 for t in w if t["buyer_id"]  == account_id),
+            "sell_usd":   sell_usd,
+            "sell_trades":sum(1 for t in w if t["seller_id"] == account_id),
+            "net_usd":    buy_usd - sell_usd,
+        }
+    return result
 
 
 @router.get("/account")

@@ -348,51 +348,19 @@ async function loadLitFlow(accountId) {
   const grid = $('#litFlowGrid');
   const msg = $('#flowLoadingMsg');
   if (!grid) return;
-  grid.innerHTML = `<div style="background:var(--bg);padding:20px;color:var(--ink-faint);font-size:11px;grid-column:1/-1">loading…</div>`;
+  grid.innerHTML = `<div style="background:var(--bg);padding:20px;color:var(--ink-faint);font-size:11px;grid-column:1/-1">loading from explorer…</div>`;
   if (msg) msg.textContent = 'fetching…';
 
   try {
     const mq = _flowMarket ? `&market_id=${_flowMarket}` : '';
-    _flowData = await fetch(`/api/lit/account-flow?account_id=${accountId}${mq}`)
+    const addrQ = _histAddress ? `&address=${encodeURIComponent(_histAddress)}` : '';
+    _flowData = await fetch(`/api/lit/account-flow-live?account_id=${accountId}${addrQ}${mq}`)
       .then(r => r.ok ? r.json() : Promise.reject(r.status));
-
-    const hasAnyData = Object.values(_flowData).some(d => d.buy_trades > 0 || d.sell_trades > 0);
-    if (!hasAnyData) {
-      grid.innerHTML = `
-        <div style="background:var(--bg);padding:24px;grid-column:1/-1;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-          <div>
-            <div style="font-size:12px;color:var(--ink)">No LIT trades in local DB for this account</div>
-            <div style="font-size:11px;color:var(--ink-faint);margin-top:4px">Trade history is visible in the explorer tab, but the flow DB needs to be synced first.</div>
-          </div>
-          <button id="syncFlowBtn" class="btn" style="padding:6px 16px;white-space:nowrap">↺ Sync History</button>
-        </div>`;
-      $('#syncFlowBtn')?.addEventListener('click', () => syncAccountFlow(accountId));
-    } else {
-      renderLitFlow(_flowData);
-    }
+    renderLitFlow(_flowData);
     if (msg) msg.textContent = '';
   } catch (e) {
-    grid.innerHTML = `<div style="background:var(--bg);padding:20px;color:var(--red);font-size:11px;grid-column:1/-1">failed to load flow data</div>`;
+    grid.innerHTML = `<div style="background:var(--bg);padding:20px;color:var(--red);font-size:11px;grid-column:1/-1">failed to load: ${e.message}</div>`;
     if (msg) msg.textContent = '';
-  }
-}
-
-async function syncAccountFlow(accountId) {
-  const grid = $('#litFlowGrid');
-  const btn = $('#syncFlowBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'syncing…'; }
-  if (grid) grid.innerHTML = `<div style="background:var(--bg);padding:20px;color:var(--ink-faint);font-size:11px;grid-column:1/-1">Fetching trade history from explorer… this may take 10–30 seconds.</div>`;
-
-  try {
-    const res = await fetch(`/api/lit/sync-account?account_id=${accountId}`).then(r => r.json());
-    const synced = res.trades_synced ?? 0;
-    if (synced === 0) {
-      grid.innerHTML = `<div style="background:var(--bg);padding:20px;color:var(--ink-faint);font-size:11px;grid-column:1/-1">No LIT trades found for this account on the explorer (they may not have traded LIT).</div>`;
-    } else {
-      await loadLitFlow(accountId);
-    }
-  } catch (e) {
-    grid.innerHTML = `<div style="background:var(--bg);padding:20px;color:var(--red);font-size:11px;grid-column:1/-1">Sync failed: ${e.message}</div>`;
   }
 }
 
@@ -418,7 +386,7 @@ function renderLitFlow(data) {
 
     return `<div style="background:var(--bg);padding:18px">
       <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:12px">${labels[p]}</div>
-      ${noData ? `<div style="color:var(--ink-faint);font-size:11px">no LIT trades in DB for this window</div>` : `
+      ${noData ? `<div style="color:var(--ink-faint);font-size:11px">no LIT trades found in this window</div>` : `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
         <div>
           <div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);margin-bottom:3px">Buy</div>
