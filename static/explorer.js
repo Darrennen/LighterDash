@@ -264,17 +264,16 @@ async function loadHistory(offset = 0) {
 
   try {
     const mq = _histMarket ? `&market_id=${_histMarket}` : '';
-    // fetch slightly more than page size to know if there's a next page
     const res = await fetch(
-      `/api/explorer/history?address=${encodeURIComponent(_histAddress)}&account_index=${_histAccountIndex}&limit=${HIST_PAGE + 1}&offset=${offset}${mq}`
+      `/api/explorer/history?address=${encodeURIComponent(_histAddress)}&account_index=${_histAccountIndex}&limit=${HIST_PAGE}&offset=${offset}${mq}`
     ).then(r => r.json());
 
-    const all = res.trades || [];
-    const hasNext = all.length > HIST_PAGE;
-    const trades = all.slice(0, HIST_PAGE);
+    const trades = res.trades || [];
+    // explorer API caps at 100 per page — if we got a full page, assume there's more
+    const hasNext = trades.length === HIST_PAGE;
 
     if (!trades.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty">no trades found${_histMarket ? ' for this market filter' : ''} at this offset</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="empty">no trades found${_histMarket ? ' for this market filter' : ''}${offset > 0 ? ' — you may have reached the end' : ''}</td></tr>`;
       if (offset > 0) {
         $('#histPrevBtn').style.display = '';
       }
