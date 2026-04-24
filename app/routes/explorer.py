@@ -1,9 +1,14 @@
 """Lighter account explorer endpoint."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+import re
+
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.services.lighter_client import client
+from app.services.ratelimit import explorer_limiter
+
+_ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 router = APIRouter()
 
@@ -51,12 +56,18 @@ _LIT_STAKING_POOL = 281_474_976_710_654
 
 @router.get("/history")
 async def account_history(
+    request: Request,
     address: str = Query(..., description="0x wallet address"),
     account_index: int = Query(..., description="Numeric account index"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     market_id: int | None = None,
 ):
+    client_ip = request.client.host if request.client else "unknown"
+    if not explorer_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests — please slow down")
+    if not _ETH_ADDR_RE.match(address):
+        raise HTTPException(status_code=400, detail="Invalid Ethereum address format")
     """Full trade history from explorer.elliot.ai (months of data, no auth)."""
     logs = await client.account_logs(address=address, limit=limit, offset=offset)
     trades = []
@@ -71,12 +82,27 @@ async def account_history(
 
 
 @router.get("/account")
-async def account_lookup(query: str = Query(..., description="Account # or 0x wallet address")):
+async def account_lookup(
+    request: Request,
+    query: str = Query(..., description="Account # or 0x wallet address"),
+):
+    client_ip = request.client.host if request.client else "unknown"
+    if not explorer_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests — please slow down")
+
     query = query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
 
-    by = "l1_address" if query.startswith("0x") else "index"
+    if query.startswith("0x"):
+        if not _ETH_ADDR_RE.match(query):
+            raise HTTPException(status_code=400, detail="Invalid Ethereum address format (expected 0x + 40 hex chars)")
+        by = "l1_address"
+    else:
+        if not query.isdigit():
+            raise HTTPException(status_code=400, detail="Account index must be a number")
+        by = "index"
+
     data = await client.account(by=by, value=query)
 
     if not data:

@@ -23,16 +23,21 @@ logging.basicConfig(
 
 ROOT = Path(__file__).resolve().parent.parent
 
+import os
+
 app = FastAPI(
     title="Lighter Analyst Cockpit",
     description="Aggregates Lighter.xyz market data.",
     version="0.1.0",
+    # Disable interactive API docs in production; set ENABLE_DOCS=1 to re-enable
+    docs_url="/docs" if os.getenv("ENABLE_DOCS") == "1" else None,
+    redoc_url=None,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
+    allow_methods=["GET", "HEAD", "OPTIONS"],  # read-only — no POST/PUT/DELETE
     allow_headers=["*"],
 )
 

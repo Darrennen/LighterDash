@@ -43,7 +43,7 @@ $$('.tab').forEach(tab => {
 
 // ── render functions ──────────────────────────────────────────
 
-function renderAccount(data) {
+function renderAccount(data, priceMap = {}) {
   $('#results').style.display = '';
   const idx = data.account_index;
   _currentAccountIndex = idx;
@@ -67,13 +67,27 @@ function renderAccount(data) {
     : '';
   $('#acctStatus').innerHTML = `<span style="color:${statusColor};font-size:12px">${statusLabel}</span>${stakingBadge}`;
 
-  $('#cardPortfolio').textContent = fmtUsd(parseFloat(data.total_asset_value));
-  $('#cardCollateral').textContent = fmtUsd(parseFloat(data.collateral));
-  $('#cardAvail').textContent = fmtUsd(parseFloat(data.available_balance));
+  // Portfolio value: API may return 0 for spot-only accounts that haven't
+  // deposited USDC collateral. Fall back to estimating from spot asset values.
+  const apiPortfolio = parseFloat(data.total_asset_value || 0);
+  const spotEstimate = (data.assets || []).reduce((sum, a) => {
+    const price = priceMap[a.symbol] ?? 0;
+    return sum + parseFloat(a.balance || 0) * price;
+  }, 0);
+  const collateral = parseFloat(data.collateral || 0);
+  const portfolioValue = apiPortfolio > 0 ? apiPortfolio : collateral + spotEstimate;
+  $('#cardPortfolio').textContent = fmtUsd(portfolioValue);
+  if (apiPortfolio === 0 && spotEstimate > 0) {
+    // show that this is an estimate
+    $('#cardPortfolio').title = 'Estimated from spot token balances × current prices';
+    $('#cardPortfolio').style.opacity = '0.85';
+  }
+  $('#cardCollateral').textContent = fmtUsd(collateral);
+  $('#cardAvail').textContent = fmtUsd(parseFloat(data.available_balance || 0));
   $('#cardOrders').textContent = data.pending_order_count ?? '—';
 
   renderPositions(data.positions || []);
-  renderAssets(data.assets || []);
+  renderAssets(data.assets || [], priceMap);
   renderLitStaking(data.lit_staking || {});
 
   // prime history state — loads on tab click
@@ -119,22 +133,41 @@ function renderPositions(positions) {
   }).join('');
 }
 
-function renderAssets(assets) {
+function renderAssets(assets, priceMap = {}) {
   const tbody = $('#assetBody');
   if (!assets.length) {
-    tbody.innerHTML = `<tr><td colspan="3" class="empty">no spot assets held</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">no spot assets held</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = assets.map(a => {
+  let totalUsd = 0;
+  const rows = assets.map(a => {
     const bal = parseFloat(a.balance);
     const locked = parseFloat(a.locked_balance || 0);
+    const price = priceMap[a.symbol];
+    const usdVal = price != null ? bal * price : null;
+    if (usdVal != null) totalUsd += usdVal;
+    const usdDisplay = usdVal != null
+      ? `<span style="font-weight:${usdVal >= 1000 ? '600' : '400'}">${fmtUsd(usdVal)}</span>`
+      : `<span style="color:var(--ink-faint)">—</span>`;
     return `<tr>
       <td style="font-weight:600">${a.symbol}</td>
       <td class="num">${fmtNum(bal, 6)}</td>
-      <td class="num" style="color:${locked > 0 ? 'var(--amber)' : 'var(--ink-faint)'}">${locked > 0 ? fmtNum(locked, 6) : '—'}</td>
+      <td class="num">${usdDisplay}</td>
+      <td class="num" style="color:${locked > 0 ? 'var(--amber)' : 'var(--ink-faint)'}" title="${locked > 0 ? 'Reserved for pending limit orders' : ''}">${locked > 0 ? fmtNum(locked, 6) : '—'}</td>
     </tr>`;
   }).join('');
+
+  const totalRow = totalUsd > 0
+    ? `<tr style="border-top:1px solid var(--line);font-weight:600">
+        <td style="color:var(--ink-faint);font-size:10px;letter-spacing:.1em;text-transform:uppercase">Total</td>
+        <td></td>
+        <td class="num">${fmtUsd(totalUsd)}</td>
+        <td></td>
+       </tr>`
+    : '';
+
+  tbody.innerHTML = rows + totalRow;
 }
 
 function renderLitStaking(s) {
@@ -308,13 +341,25 @@ async function doSearch() {
   $('#searchBtn').disabled = true;
 
   try {
-    const r = await fetch(`/api/explorer/account?query=${encodeURIComponent(query)}`);
+    const [r, litRes] = await Promise.all([
+      fetch(`/api/explorer/account?query=${encodeURIComponent(query)}`),
+      fetch('/api/lit/summary').catch(() => null),
+    ]);
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${r.status}`);
     }
     const data = await r.json();
-    renderAccount(data);
+
+    // build price map: LIT price from the spot market, USDC always $1
+    const priceMap = { USDC: 1.0 };
+    if (litRes?.ok) {
+      const lit = await litRes.json();
+      const litPrice = lit?.spot?.last_price ?? lit?.perp?.last_price;
+      if (litPrice) priceMap['LIT'] = parseFloat(litPrice);
+    }
+
+    renderAccount(data, priceMap);
 
     // switch to positions tab by default
     $$('.tab').forEach(t => t.classList.remove('active'));

@@ -48,7 +48,7 @@ const fmtTimeMYT = ts => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleTimeString
   hour: '2-digit', minute: '2-digit', second: '2-digit',
 });
 const fmtAcct = id => id ? '#' + id : '—';
-const periodLabel = h => h === 24 ? '24h' : h === 168 ? '7d' : h === 720 ? '30d' : h + 'h';
+const periodLabel = h => h === 0 ? 'all time' : h === 24 ? '24h' : h === 168 ? '7d' : h === 720 ? '30d' : h + 'h';
 
 function setStatus(kind, text) {
   const dot = $('#statusDot'), txt = $('#statusText');
@@ -525,6 +525,7 @@ async function pollOnce() {
     // Update period button labels to reflect actual data age
     $$('.controls .btn[data-hours]').forEach(b => {
       const bh = Number(b.dataset.hours);
+      if (bh === 0) return; // "ALL TIME" button needs no coverage warning
       const orig = b.dataset.label || (b.dataset.label = b.textContent);
       if (actualHours > 0 && actualHours < bh * 0.95) {
         b.textContent = orig + ' (' + fmtDuration(actualHours) + ')';
@@ -619,6 +620,258 @@ $$('.controls .btn[data-refresh]').forEach(b => {
   });
 });
 
+// ── funding comparison ────────────────────────────────────────
+
+const EXCHANGE_DISPLAY = {
+  lighter: 'Lighter', binance: 'Binance', bybit: 'Bybit',
+  hyperliquid: 'HyperLiquid', okx: 'OKX', gate: 'Gate', deribit: 'Deribit',
+};
+
+function renderFunding(byExchange) {
+  const grid = $('#fundingGrid');
+  const arbEl = $('#fundingArb');
+  if (!grid) return;
+  if (!byExchange || !Object.keys(byExchange).length) {
+    grid.innerHTML = '<div style="background:var(--bg);padding:14px;color:var(--ink-faint);font-size:11px">no cross-exchange data available yet</div>';
+    return;
+  }
+
+  const rates = Object.entries(byExchange)
+    .map(([key, val]) => ({ key, exchange: EXCHANGE_DISPLAY[key] || key, rate: parseFloat(val) }))
+    .filter(r => !isNaN(r.rate))
+    .sort((a, b) => {
+      const order = ['lighter','binance','bybit','hyperliquid'];
+      return (order.indexOf(a.key) + 10) - (order.indexOf(b.key) + 10);
+    });
+
+  if (!rates.length) {
+    grid.innerHTML = '<div style="background:var(--bg);padding:14px;color:var(--ink-faint);font-size:11px">no rate data available</div>';
+    return;
+  }
+
+  const lighterRate = rates.find(r => r.key === 'lighter')?.rate ?? rates[0].rate;
+
+  grid.innerHTML = rates.map(r => {
+    const cls = r.rate >= 0 ? 'up' : 'down';
+    const apr = (r.rate * 3 * 365 * 100).toFixed(1);
+    const diff = r.rate - lighterRate;
+    const diffTxt = r.key === 'lighter' ? '' :
+      `<div style="font-size:9px;margin-top:3px;color:${Math.abs(diff) > 0.00005 ? (diff > 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink-faint)'}">
+        vs Lighter ${diff >= 0 ? '+' : ''}${(diff * 100).toFixed(4)}%
+      </div>`;
+    return `<div style="background:var(--bg);padding:16px;text-align:center">
+      <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:6px">${r.exchange}</div>
+      <div class="${cls}" style="font-size:18px;font-variant-numeric:tabular-nums;font-weight:500">${(r.rate * 100).toFixed(4)}%</div>
+      <div style="font-size:10px;color:var(--ink-dim);margin-top:2px">${apr}% APR</div>
+      ${diffTxt}
+    </div>`;
+  }).join('');
+
+  if (rates.length >= 2) {
+    const sorted = [...rates].sort((a, b) => b.rate - a.rate);
+    const spread = sorted[0].rate - sorted[sorted.length - 1].rate;
+    if (spread > 0.0002) {
+      arbEl.innerHTML = `<span style="color:var(--amber)">⚡ Funding spread ${(spread * 100).toFixed(4)}% — ${sorted[0].exchange} highest, ${sorted[sorted.length-1].exchange} lowest. Potential funding arb.</span>`;
+    } else if (arbEl) {
+      arbEl.innerHTML = `<span style="color:var(--ink-faint)">Spread ${(spread * 100).toFixed(4)}% — rates aligned across exchanges.</span>`;
+    }
+  }
+}
+
+// ── staking activity ──────────────────────────────────────────
+
+function renderStakingActivity(data) {
+  const tbody = $('#stakingBody');
+  const countEl = $('#stakingCount');
+  if (!tbody) return;
+  const events = data?.events || [];
+  const scanned = data?.accounts_scanned || 0;
+  if (countEl) countEl.textContent = events.length
+    ? `${events.length} events · ${scanned} accounts scanned`
+    : `${scanned} accounts scanned`;
+
+  if (!events.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">no recent stake / unstake events found among top traders</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = events.map(e => {
+    const isStake = e.type === 'stake';
+    const typeHtml = isStake
+      ? `<span class="pill buy" style="font-size:9px;padding:1px 8px">STAKE</span>`
+      : `<span class="pill sell" style="font-size:9px;padding:1px 8px">UNSTAKE</span>`;
+    const timeLbl = e.time ? fmtMYT(e.time) : '—';
+    const rowStyle = isStake
+      ? 'background:rgba(111,224,137,0.04);box-shadow:inset 3px 0 0 var(--green)'
+      : 'background:rgba(255,90,90,0.04);box-shadow:inset 3px 0 0 var(--red)';
+    return `<tr style="${rowStyle}">
+      <td style="color:var(--ink-faint);font-size:11px">${timeLbl}</td>
+      <td>${typeHtml}</td>
+      <td class="acct" style="font-size:12px">
+        ${fmtAcct(e.account_id)}
+        <a href="/explorer?q=${e.account_id}" target="_blank"
+           style="color:var(--accent);font-size:9px;margin-left:4px;text-decoration:none">↗</a>
+      </td>
+      <td class="num ${isStake ? 'up' : 'down'}" style="font-weight:600">${fmtUsd(e.amount)}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function pollStaking() {
+  try {
+    const data = await apiGet('/api/lit/staking-activity');
+    renderStakingActivity(data);
+  } catch (e) {
+    console.warn('staking-activity fetch failed:', e.message);
+  }
+}
+
+async function pollFunding() {
+  try {
+    const data = await apiGet('/api/lit/funding');
+    renderFunding(data.by_exchange || {});
+  } catch (e) {
+    console.warn('funding fetch failed:', e.message);
+  }
+}
+
+// ── protocol buybacks ─────────────────────────────────────────
+
+let _buybackPeriod = 7;
+let _buybackStats = [];
+
+function renderBuybacks(data, period) {
+  const stats = (data.stats || []).slice().reverse(); // oldest → newest
+  const balances = data.balances || {};
+  const lit = balances.lit || {};
+  const usdc = balances.usdc || {};
+
+  const cutoff = period > 0
+    ? new Date(Date.now() - period * 86400000).toISOString().slice(0, 10)
+    : '2000-01-01';
+  const filtered = stats.filter(s => s.date >= cutoff);
+
+  const totalVol = filtered.reduce((s, r) => s + r.volume, 0);
+  const totalTrades = filtered.reduce((s, r) => s + r.count, 0);
+  const days = filtered.length || 1;
+  const avgDaily = totalVol / days;
+
+  $('#buybackCount').textContent = `${fmtUsd(totalVol)} · ${period > 0 ? period + 'd' : 'all time'}`;
+
+  // KPI cards
+  $('#buybackKpis').innerHTML = [
+    { lbl: 'Total Bought', val: fmtUsd(totalVol), cls: 'up' },
+    { lbl: 'Avg / Day', val: fmtUsd(avgDaily), cls: '' },
+    { lbl: 'Total Trades', val: Number(totalTrades).toLocaleString(), cls: '' },
+    { lbl: 'LIT in Treasury', val: Number(lit.total || 0).toLocaleString(undefined, { maximumFractionDigits: 0 }), cls: '' },
+    { lbl: 'USDC Available', val: fmtUsd(usdc.available || 0), cls: '' },
+    { lbl: 'USDC Locked', val: fmtUsd(usdc.locked || 0), cls: '' },
+  ].map(k => `
+    <div style="background:var(--bg);padding:16px">
+      <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:6px">${k.lbl}</div>
+      <div class="${k.cls}" style="font-size:18px;font-variant-numeric:tabular-nums;font-weight:500">${k.val}</div>
+    </div>`).join('');
+
+  // SVG bar chart
+  const chartEl = $('#buybackChart');
+  const W = 800, H = 80;
+  if (filtered.length < 2) {
+    chartEl.innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:8px 0">not enough data</div>';
+  } else {
+    const maxVol = Math.max(...filtered.map(s => s.volume)) || 1;
+    const bw = W / filtered.length;
+    const bars = filtered.map((s, i) => {
+      const bh = (s.volume / maxVol * H).toFixed(1);
+      const x = (i * bw).toFixed(1);
+      const y = (H - bh).toFixed(1);
+      return `<rect x="${x}" y="${y}" width="${(bw - 1).toFixed(1)}" height="${bh}"
+        fill="rgba(111,224,137,0.6)" rx="1">
+        <title>${s.date}: ${fmtUsd(s.volume)} · ${s.count} trades</title></rect>`;
+    }).join('');
+    chartEl.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block">
+        ${bars}
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:2px">
+        <span>${filtered[0]?.date || ''}</span>
+        <span style="color:var(--green);font-weight:700">avg ${fmtUsd(avgDaily)}/day</span>
+        <span>${filtered[filtered.length - 1]?.date || ''}</span>
+      </div>`;
+  }
+
+  // Table — show most recent first
+  const rows = [...filtered].reverse().slice(0, 60);
+  $('#buybackBody').innerHTML = rows.length
+    ? rows.map(s => {
+        const avg = s.count > 0 ? s.volume / s.count : 0;
+        return `<tr>
+          <td style="color:var(--ink-dim)">${s.date}</td>
+          <td class="num up" style="font-weight:600">${fmtUsd(s.volume)}</td>
+          <td class="num">${Number(s.count).toLocaleString()}</td>
+          <td class="num" style="color:var(--ink-dim)">${fmtUsd(avg)}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="4" class="empty">no data for this period</td></tr>`;
+}
+
+async function pollBuybacks() {
+  try {
+    const data = await apiGet('/api/lit/buybacks');
+    _buybackStats = data;
+    renderBuybacks(data, _buybackPeriod);
+  } catch (e) {
+    console.warn('buybacks fetch failed:', e.message);
+  }
+}
+
+$$('[data-bperiod]').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('[data-bperiod]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    _buybackPeriod = Number(b.dataset.bperiod);
+    if (_buybackStats) renderBuybacks(_buybackStats, _buybackPeriod);
+  });
+});
+
+// ── deep history backfill status ──────────────────────────────
+
+async function pollBackfillStatus() {
+  try {
+    const d = await apiGet('/api/lit/backfill-status');
+    const known = d.accounts_known || 0;
+    const done  = d.accounts_backfilled || 0;
+    const found = d.trades_found || 0;
+    $('#kpi-backfill-val').textContent = done + ' / ' + known;
+    const pct = known > 0 ? Math.round(done / known * 100) : 0;
+    $('#kpi-backfill-sub').innerHTML = done < known
+      ? `<span style="color:var(--amber)">${pct}% done · ${fmtNum(found,0)} trades found</span>`
+      : `<span style="color:var(--green)">✓ complete · ${fmtNum(found,0)} trades</span>`;
+  } catch (e) {
+    // silently ignore
+  }
+}
+
+async function triggerBackfill() {
+  try {
+    await apiGet('/api/lit/backfill-trigger');
+    $('#kpi-backfill-sub').innerHTML = '<span style="color:var(--amber)">running…</span>';
+    setTimeout(pollBackfillStatus, 5000);
+  } catch (e) { /* ignore */ }
+}
+
 // ── boot ──────────────────────────────────────────────────────
 pollOnce();
 schedule();
+pollFunding();
+pollStaking();
+pollBuybacks();
+pollBackfillStatus();
+setInterval(pollFunding, 30_000);
+setInterval(pollStaking, 60_000);
+setInterval(pollBuybacks, 300_000);  // 5 min, matches cache TTL
+setInterval(pollBackfillStatus, 15_000);
+
+$('#refreshStakingBtn')?.addEventListener('click', () => {
+  $('#stakingBody').innerHTML = '<tr><td colspan="4" class="empty">refreshing…</td></tr>';
+  pollStaking();
+});

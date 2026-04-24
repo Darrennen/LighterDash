@@ -36,6 +36,7 @@
     <button class="btn active" data-hours="24">24h</button>
     <button class="btn" data-hours="168">7d</button>
     <button class="btn" data-hours="720">30d</button>
+    <button class="btn" data-hours="0">ALL TIME</button>
   </div>
   <div class="controls" style="margin-left:0">
     <span class="mode-label">REFRESH</span>
@@ -92,6 +93,11 @@
     <div class="lbl">Stored Trades</div>
     <div class="val" id="kpi-stored">—</div>
     <div class="sub" id="kpi-stored-sub">building history…</div>
+  </div>
+  <div class="kpi" id="kpi-backfill" style="cursor:pointer" title="Click to trigger next batch" onclick="triggerBackfill()">
+    <div class="lbl">Deep History</div>
+    <div class="val" id="kpi-backfill-val">—</div>
+    <div class="sub" id="kpi-backfill-sub">accounts backfilled</div>
   </div>
 </section>
 
@@ -237,6 +243,15 @@
   </table>
 </div>
 
+<!-- cross-exchange funding comparison -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>Funding Rate Comparison <span class="count">LIT-PERP · all exchanges</span></h2>
+  <div id="fundingGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)">
+    <div style="background:var(--bg);padding:14px;color:var(--ink-faint);font-size:11px">loading…</div>
+  </div>
+  <div id="fundingArb" style="margin-top:10px;font-size:11px"></div>
+</div>
+
 <!-- leaders tables -->
 <div class="leaders-grid">
   <div class="panel">
@@ -278,6 +293,58 @@
       </tbody>
     </table>
   </div>
+</div>
+
+<!-- protocol buybacks -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>Protocol Buybacks
+    <span class="count" id="buybackCount"></span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <button class="btn active" data-bperiod="7">7d</button>
+      <button class="btn" data-bperiod="30">30d</button>
+      <button class="btn" data-bperiod="0">all</button>
+    </span>
+  </h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:12px" id="buybackKpis">
+    <div style="background:var(--bg);padding:14px;color:var(--ink-faint);font-size:11px">loading…</div>
+  </div>
+  <div id="buybackChart" style="min-height:80px;margin-bottom:8px"></div>
+  <table id="buybackTable">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th class="num">Volume (USD)</th>
+        <th class="num">Trades</th>
+        <th class="num">Avg / Trade</th>
+      </tr>
+    </thead>
+    <tbody id="buybackBody">
+      <tr><td colspan="4" class="empty">loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- staking activity feed -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>LIT Staking Activity
+    <span class="count" id="stakingCount"></span>
+    <span style="margin-left:auto">
+      <button id="refreshStakingBtn" class="btn" style="font-size:9px;padding:3px 10px">↺ refresh</button>
+    </span>
+  </h2>
+  <table id="stakingTable">
+    <thead>
+      <tr>
+        <th>Time (MYT)</th>
+        <th>Type</th>
+        <th>Account</th>
+        <th class="num">Amount (USDC)</th>
+      </tr>
+    </thead>
+    <tbody id="stakingBody">
+      <tr><td colspan="4" class="empty">loading staking activity…</td></tr>
+    </tbody>
+  </table>
 </div>
 
 <footer>

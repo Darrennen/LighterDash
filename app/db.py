@@ -44,6 +44,13 @@ CREATE INDEX IF NOT EXISTS idx_lit_buyer
     ON lit_trades (buyer_id, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_lit_seller
     ON lit_trades (seller_id, ts DESC);
+
+CREATE TABLE IF NOT EXISTS lit_backfill_log (
+    account_id     INTEGER PRIMARY KEY,
+    l1_address     TEXT    NOT NULL,
+    backfilled_at  INTEGER NOT NULL,
+    trades_found   INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -163,10 +170,16 @@ async def fetch_lit_trades(
     ]
 
 
+def _time_where(hours: int) -> tuple[str, list]:
+    """Return (WHERE clause, params) handling hours=0 as all-time."""
+    if hours > 0:
+        since_ms = int((time.time() - hours * 3600) * 1000)
+        return "ts >= ?", [since_ms]
+    return "1=1", []
+
+
 async def fetch_lit_flow(hours: int = 24, market_id: int | None = None) -> dict[str, Any]:
-    since_ms = int((time.time() - hours * 3600) * 1000)
-    where = "ts >= ?"
-    params: list = [since_ms]
+    where, params = _time_where(hours)
     if market_id is not None:
         where += " AND market_id = ?"
         params.append(market_id)
@@ -197,9 +210,7 @@ async def fetch_lit_flow(hours: int = 24, market_id: int | None = None) -> dict[
 async def fetch_lit_leaders(
     hours: int = 24, top_n: int = 15, market_id: int | None = None
 ) -> dict[str, Any]:
-    since_ms = int((time.time() - hours * 3600) * 1000)
-    where = "ts >= ?"
-    params: list = [since_ms]
+    where, params = _time_where(hours)
     if market_id is not None:
         where += " AND market_id = ?"
         params.append(market_id)
@@ -229,6 +240,55 @@ async def fetch_lit_leaders(
     return {"buyers": buyers, "sellers": sellers, "hours": hours, "market_id": market_id}
 
 
+async def fetch_all_lit_account_ids() -> list[int]:
+    """All unique account IDs (buyer or seller) ever seen in lit_trades."""
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """SELECT DISTINCT account_id FROM (
+                 SELECT buyer_id  AS account_id FROM lit_trades WHERE buyer_id  > 0
+                 UNION
+                 SELECT seller_id AS account_id FROM lit_trades WHERE seller_id > 0
+               ) ORDER BY account_id"""
+        )
+        rows = await cur.fetchall()
+    return [int(r[0]) for r in rows]
+
+
+async def fetch_backfilled_ids() -> set[int]:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute("SELECT account_id FROM lit_backfill_log")
+        rows = await cur.fetchall()
+    return {int(r[0]) for r in rows}
+
+
+async def mark_backfilled(account_id: int, l1_address: str, trades_found: int) -> None:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.execute(
+            """INSERT OR REPLACE INTO lit_backfill_log
+               (account_id, l1_address, backfilled_at, trades_found)
+               VALUES (?, ?, ?, ?)""",
+            (account_id, l1_address, int(time.time()), trades_found),
+        )
+        await db.commit()
+
+
+async def fetch_backfill_status() -> dict[str, Any]:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute("SELECT COUNT(*), SUM(trades_found) FROM lit_backfill_log")
+        row = await cur.fetchone()
+        done = row[0] or 0
+        total_found = row[1] or 0
+        cur2 = await db.execute(
+            """SELECT COUNT(DISTINCT account_id) FROM (
+                 SELECT buyer_id AS account_id FROM lit_trades WHERE buyer_id > 0
+                 UNION SELECT seller_id FROM lit_trades WHERE seller_id > 0
+               )"""
+        )
+        row2 = await cur2.fetchone()
+        known = row2[0] or 0
+    return {"accounts_known": known, "accounts_backfilled": done, "trades_found": total_found}
+
+
 async def fetch_lit_account_trades(
     account_id: int, hours: int = 24, role: str = "buyer",
     market_id: int | None = None,
@@ -255,6 +315,22 @@ async def fetch_lit_account_trades(
          "taker_is_buyer": r[8]}
         for r in rows
     ]
+
+
+async def fetch_lit_top_accounts(hours: int = 168, limit: int = 20) -> list[int]:
+    """Return top unique account IDs by USD volume across buying + selling."""
+    since_ms = int((time.time() - hours * 3600) * 1000)
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """SELECT account_id, SUM(usd) as vol FROM (
+                 SELECT buyer_id  AS account_id, usd FROM lit_trades WHERE ts >= ?
+                 UNION ALL
+                 SELECT seller_id AS account_id, usd FROM lit_trades WHERE ts >= ?
+               ) GROUP BY account_id ORDER BY vol DESC LIMIT ?""",
+            (since_ms, since_ms, limit),
+        )
+        rows = await cur.fetchall()
+    return [int(r[0]) for r in rows if r[0]]
 
 
 async def fetch_lit_stats() -> dict[str, Any]:
