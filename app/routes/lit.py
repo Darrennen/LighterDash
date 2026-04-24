@@ -19,8 +19,10 @@ from app.db import (
     fetch_lit_top_accounts,
     fetch_lit_trades,
     init_db,
+    mark_backfilled,
 )
 from app.services.collector import (
+    _backfill_single_account,
     backfill_account_histories,
     backfill_lit_once,
     collect_lit_once,
@@ -144,6 +146,22 @@ async def account_flow(
     return await fetch_lit_account_flow(
         account_id=account_id, market_id=_market_filter(market_id)
     )
+
+
+@router.get("/sync-account")
+async def sync_account(account_id: int):
+    """Fetch full LIT trade history for one account from the explorer and store it."""
+    await _maybe_refresh()
+    try:
+        data = await client.account(by="index", value=str(account_id))
+        addr = data.get("l1_address", "")
+    except Exception:
+        addr = ""
+    if not addr:
+        raise HTTPException(status_code=404, detail="Account address not found")
+    n = await _backfill_single_account(account_id, addr)
+    await mark_backfilled(account_id, addr, n)
+    return {"account_id": account_id, "trades_synced": n}
 
 
 @router.get("/account")
