@@ -43,6 +43,9 @@
   .tab{padding:8px 16px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;background:var(--panel);color:var(--ink-dim);border:none;font-family:var(--font-mono);transition:color .15s}
   .tab.active{color:var(--ink);background:var(--bg);border-bottom:2px solid var(--accent)}
   .tab-panel{display:none}.tab-panel.active{display:block}
+  .btn{padding:4px 10px;border:1px solid var(--line-2);border-radius:3px;color:var(--ink-dim);font-size:10px;letter-spacing:.08em;text-transform:uppercase;transition:all .15s;cursor:pointer;font-family:var(--font-mono);background:none}
+  .btn:hover{border-color:var(--accent);color:var(--ink)}
+  .btn.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:700}
 </style>
 </head>
 <body>
@@ -113,10 +116,15 @@
             <div id="pBias" style="font-size:13px;font-weight:700">—</div>
             <div style="height:3px;background:var(--line);border-radius:2px;margin-top:7px"><div id="pBiasFill" style="height:100%;border-radius:2px;width:50%;background:var(--ink-faint);transition:width .4s"></div></div>
           </div>
-          <div style="background:var(--bg);padding:11px 14px">
-            <div style="font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:5px">Leverage</div>
-            <div id="pLeverage" style="font-size:13px;font-weight:700">—</div>
-            <div style="height:3px;background:var(--line);border-radius:2px;margin-top:7px"><div id="pLevFill" style="height:100%;border-radius:2px;width:0%;background:var(--amber);transition:width .4s"></div></div>
+          <div style="background:var(--bg);padding:8px 10px 4px;display:flex;flex-direction:column;align-items:center">
+            <div style="font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);align-self:flex-start">Leverage</div>
+            <svg id="levGaugeSvg" viewBox="0 0 120 88" style="width:100%;max-width:90px;display:block;overflow:visible">
+              <path id="levTrack" fill="none" stroke-width="7" stroke-linecap="round"/>
+              <path id="levFillArc" fill="none" stroke-width="7" stroke-linecap="round"/>
+              <circle id="levDot" r="4.5"/>
+              <text id="levText" x="60" y="52" text-anchor="middle" dominant-baseline="middle" style="font-size:20px;font-weight:700;font-family:'JetBrains Mono',monospace;fill:var(--ink)">—</text>
+              <text x="60" y="74" text-anchor="middle" style="font-size:8px;font-family:'JetBrains Mono',monospace;letter-spacing:.12em;fill:var(--ink-faint)">LEV</text>
+            </svg>
           </div>
         </div>
 
@@ -141,11 +149,22 @@
         </div>
       </div>
 
-      <!-- RIGHT: positions PnL chart -->
-      <div style="background:var(--bg);padding:20px 22px;min-height:220px">
-        <div style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:14px">Positions · Unrealized P&L</div>
-        <svg id="posPnlChart" style="width:100%;display:none;overflow:visible"></svg>
-        <div id="posPnlEmpty" style="color:var(--ink-faint);font-size:12px;font-style:italic;padding:20px 0">no open positions</div>
+      <!-- RIGHT: net trade flow chart -->
+      <div style="background:var(--bg);padding:18px 22px;min-height:220px">
+        <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:4px">Net Trade Flow</div>
+            <div id="flowPnlTotal" style="font-family:'Fraunces',serif;font-size:26px;font-weight:500;letter-spacing:-.02em;line-height:1">—</div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:3px;flex-wrap:wrap" id="flowPeriodBtns">
+            <button class="btn active" data-flow-period="all">All</button>
+            <button class="btn" data-flow-period="30d">30d</button>
+            <button class="btn" data-flow-period="7d">7d</button>
+            <button class="btn" data-flow-period="24h">24h</button>
+          </div>
+        </div>
+        <svg id="flowChart" viewBox="0 0 400 100" preserveAspectRatio="none" style="width:100%;height:110px;display:none;overflow:visible"></svg>
+        <div id="flowChartEmpty" style="color:var(--ink-faint);font-size:11px;font-style:italic;padding:8px 0">search an account to see trade flow</div>
       </div>
     </div>
   </div>
@@ -170,8 +189,8 @@
             <th class="num">Size</th>
             <th class="num">Avg Entry</th>
             <th class="num">Position Value</th>
-            <th class="num">Unrealized PnL</th>
-            <th class="num">Liq. Price</th>
+            <th class="num">Unrealized PnL / ROE</th>
+            <th class="num">Liq. Price · Dist</th>
             <th class="num">Funding Paid</th>
             <th class="num">Alloc</th>
           </tr>

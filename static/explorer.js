@@ -107,76 +107,186 @@ function renderPortfolioSummary(data, priceMap = {}) {
   $('#pBiasFill').style.width = longPct + '%';
   $('#pBiasFill').style.background = longPct > 50 ? 'var(--green)' : 'var(--red)';
 
-  // leverage
-  const levColor = leverage > 10 ? 'var(--red)' : leverage > 5 ? 'var(--amber)' : 'var(--green)';
-  const levEl = $('#pLeverage');
-  levEl.textContent = leverage > 0 ? leverage.toFixed(1) + 'x' : '—';
-  levEl.style.color = levColor;
-  $('#pLevFill').style.width = Math.min(leverage / 20 * 100, 100) + '%';
-  $('#pLevFill').style.background = levColor;
+  // leverage arc gauge
+  updateLevGauge(leverage);
 
   // unrealized pnl
   const pnlEl = $('#pUnrealPnl');
   pnlEl.textContent = unrealPnl !== 0 ? (unrealPnl >= 0 ? '+' : '') + fmtUsd(unrealPnl) : '—';
   pnlEl.style.color = unrealPnl > 0 ? 'var(--green)' : unrealPnl < 0 ? 'var(--red)' : '';
-
-  // chart
-  drawPosPnlChart(positions);
 }
 
-function drawPosPnlChart(positions) {
-  const svg   = $('#posPnlChart');
-  const empty = $('#posPnlEmpty');
-  if (!svg) return;
+// ── leverage arc gauge ────────────────────────────────────────
 
-  const withPnl = positions.filter(p => Math.abs(parseFloat(p.unrealized_pnl || 0)) > 0.001);
-  if (!withPnl.length) {
-    svg.style.display = 'none';
-    if (empty) empty.style.display = '';
+function _polar(cx, cy, r, deg) {
+  const rad = deg * Math.PI / 180;
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+function _arc(cx, cy, r, startDeg, sweepDeg) {
+  const [sx, sy] = _polar(cx, cy, r, startDeg);
+  const endDeg = startDeg + sweepDeg;
+  const [ex, ey] = _polar(cx, cy, r, endDeg);
+  const large = Math.abs(sweepDeg) > 180 ? 1 : 0;
+  const sweep = sweepDeg >= 0 ? 1 : 0;
+  return `M ${sx.toFixed(2)},${sy.toFixed(2)} A ${r},${r} 0 ${large},${sweep} ${ex.toFixed(2)},${ey.toFixed(2)}`;
+}
+
+function updateLevGauge(leverage) {
+  const track = $('#levTrack');
+  const fill  = $('#levFillArc');
+  const dot   = $('#levDot');
+  const txt   = $('#levText');
+  if (!track) return;
+
+  const CX = 60, CY = 50, R = 37;
+  const START = 150, TOTAL = 240, MAX_LEV = 20;
+
+  const color = leverage > 10 ? '#ff6a77' : leverage > 5 ? '#f2c14e' : '#6fe089';
+  const fraction = leverage > 0 ? Math.min(leverage / MAX_LEV, 1) : 0;
+  const sweep = fraction * TOTAL;
+  const dotAngle = START + sweep;
+  const [dx, dy] = _polar(CX, CY, R, dotAngle);
+
+  track.setAttribute('d', _arc(CX, CY, R, START, TOTAL));
+  track.setAttribute('stroke', '#1d2124');
+
+  if (leverage > 0) {
+    fill.setAttribute('d', _arc(CX, CY, R, START, Math.max(sweep, 1)));
+    fill.setAttribute('stroke', color);
+    fill.style.display = '';
+    dot.setAttribute('cx', dx.toFixed(2));
+    dot.setAttribute('cy', dy.toFixed(2));
+    dot.setAttribute('fill', color);
+    dot.style.display = '';
+  } else {
+    fill.style.display = 'none';
+    dot.style.display = 'none';
+  }
+
+  txt.textContent = leverage > 0 ? leverage.toFixed(1) + 'x' : '—';
+  txt.setAttribute('fill', leverage > 0 ? color : 'var(--ink-faint)');
+}
+
+// ── trade flow chart ──────────────────────────────────────────
+
+let _fillSeries = [];
+let _flowPeriod = 'all';
+
+async function fetchFillsBackground(address, accountIndex) {
+  const empty = $('#flowChartEmpty');
+  const svg   = $('#flowChart');
+  const total = $('#flowPnlTotal');
+  if (empty) { empty.style.display = ''; empty.textContent = 'loading trade history…'; }
+  if (svg) svg.style.display = 'none';
+  if (total) { total.textContent = '—'; total.style.color = ''; }
+  _fillSeries = [];
+
+  try {
+    const allFills = [];
+    for (let page = 0; page < 4; page++) {
+      const res = await fetch(
+        `/api/explorer/history?address=${encodeURIComponent(address)}&account_index=${accountIndex}&limit=100&offset=${page * 100}`
+      ).then(r => r.json());
+      const trades = res.trades || [];
+      allFills.push(...trades);
+      if (trades.length < 100) break;
+    }
+    _fillSeries = computeFlowSeries(allFills);
+    renderFlowChart(_flowPeriod);
+  } catch {
+    if (empty) { empty.style.display = ''; empty.textContent = 'could not load trade history'; }
+  }
+}
+
+function computeFlowSeries(fills) {
+  const sorted = [...fills].sort((a, b) => new Date(a.time) - new Date(b.time));
+  let cum = 0;
+  return sorted.map(f => {
+    const isBuy = (f.role === 'taker' && f.taker_is_buyer === 1) || (f.role === 'maker' && f.taker_is_buyer === 0);
+    const usd = parseFloat(f.price) * parseFloat(f.size);
+    cum += isBuy ? -usd : usd;
+    return { t: new Date(f.time).getTime(), v: cum };
+  });
+}
+
+function filterSeriesByPeriod(series, period) {
+  if (period === 'all' || !series.length) return series;
+  const ms = { '24h': 86400000, '7d': 604800000, '30d': 2592000000 }[period];
+  if (!ms) return series;
+  const cutoff = Date.now() - ms;
+  const after  = series.filter(p => p.t >= cutoff);
+  const before = series.filter(p => p.t < cutoff);
+  if (before.length && after.length) {
+    return [{ t: cutoff, v: before[before.length - 1].v }, ...after];
+  }
+  return after.length ? after : series;
+}
+
+function renderFlowChart(period) {
+  _flowPeriod = period;
+  const series = filterSeriesByPeriod(_fillSeries, period);
+  const total  = $('#flowPnlTotal');
+  if (!series.length) {
+    const empty = $('#flowChartEmpty');
+    const svg   = $('#flowChart');
+    if (svg) svg.style.display = 'none';
+    if (empty) { empty.style.display = ''; empty.textContent = 'no trade history in this window'; }
+    if (total) { total.textContent = '—'; total.style.color = ''; }
     return;
   }
-  if (empty) empty.style.display = 'none';
+  const lastVal = series[series.length - 1].v;
+  const color = lastVal >= 0 ? 'var(--green)' : 'var(--red)';
+  if (total) {
+    total.style.color = color;
+    total.textContent = (lastVal >= 0 ? '+' : '') + fmtUsd(lastVal);
+  }
+  drawFlowChart(series);
+}
+
+function drawFlowChart(series) {
+  const svg   = $('#flowChart');
+  const empty = $('#flowChartEmpty');
+  if (!svg || !series.length) return;
   svg.style.display = 'block';
+  if (empty) empty.style.display = 'none';
 
-  const barH   = 26;
-  const gap    = 8;
-  const labelW = 72;
-  const n      = withPnl.length;
-  const H      = n * (barH + gap) - gap + 4;
-  const W      = 560;
-  const midX   = W / 2;
-  const halfW  = midX - labelW - 10;
+  const W = 400, H = 100, P = 3;
+  const times = series.map(p => p.t);
+  const vals  = series.map(p => p.v);
+  const minT  = Math.min(...times), maxT = Math.max(...times);
+  const minV  = Math.min(...vals, 0), maxV = Math.max(...vals, 0);
+  const rangeT = (maxT - minT) || 1;
+  const rangeV = (maxV - minV) || 1;
 
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.style.height = H + 'px';
+  const toX = t => P + (t - minT) / rangeT * (W - P * 2);
+  const toY = v => H - P - (v - minV) / rangeV * (H - P * 2);
+  const z   = toY(0);
 
-  const maxAbs = Math.max(...withPnl.map(p => Math.abs(parseFloat(p.unrealized_pnl))), 1);
-  let out = `<line x1="${midX}" y1="0" x2="${midX}" y2="${H}" stroke="var(--line-2)" stroke-width="1" stroke-dasharray="3 3"/>`;
+  const pts = series.map(p => `${toX(p.t).toFixed(1)},${toY(p.v).toFixed(1)}`).join(' ');
+  const firstX = toX(times[0]).toFixed(1);
+  const lastX  = toX(times[times.length - 1]).toFixed(1);
+  const area   = `M ${firstX},${z.toFixed(1)} ` +
+    series.map(p => `L ${toX(p.t).toFixed(1)},${toY(p.v).toFixed(1)}`).join(' ') +
+    ` L ${lastX},${z.toFixed(1)} Z`;
 
-  withPnl.sort((a, b) => parseFloat(b.unrealized_pnl) - parseFloat(a.unrealized_pnl));
+  const lastVal = vals[vals.length - 1];
+  const col = lastVal >= 0 ? '#6fe089' : '#ff6a77';
 
-  withPnl.forEach((p, i) => {
-    const pnl  = parseFloat(p.unrealized_pnl);
-    const y    = i * (barH + gap);
-    const isP  = pnl >= 0;
-    const col  = isP ? 'var(--green)' : 'var(--red)';
-    const bW   = Math.max(2, Math.abs(pnl) / maxAbs * halfW);
-    const bX   = isP ? midX : midX - bW;
-    const cx   = midX;
-    const pnlFmt = (pnl >= 0 ? '+' : '') + fmtUsd(pnl);
-
-    out += `<rect x="${bX.toFixed(1)}" y="${y+2}" width="${bW.toFixed(1)}" height="${barH-4}" fill="${col}" opacity="0.75" rx="2"/>`;
-    // symbol label centered at midline
-    out += `<text x="${cx - 8}" y="${y + barH/2 + 4}" text-anchor="end" fill="var(--ink)" style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:700">${p.symbol}</text>`;
-    // pnl value outside bar
-    if (isP) {
-      out += `<text x="${(bX + bW + 7).toFixed(1)}" y="${y + barH/2 + 4}" fill="${col}" style="font-size:10px;font-family:'JetBrains Mono',monospace">${pnlFmt}</text>`;
-    } else {
-      out += `<text x="${(bX - 7).toFixed(1)}" y="${y + barH/2 + 4}" text-anchor="end" fill="${col}" style="font-size:10px;font-family:'JetBrains Mono',monospace">${pnlFmt}</text>`;
-    }
-  });
-
-  svg.innerHTML = out;
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="fgUp" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#6fe089" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="#6fe089" stop-opacity="0.03"/>
+      </linearGradient>
+      <linearGradient id="fgDn" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0%" stop-color="#ff6a77" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="#ff6a77" stop-opacity="0.03"/>
+      </linearGradient>
+    </defs>
+    <line x1="0" y1="${z.toFixed(1)}" x2="${W}" y2="${z.toFixed(1)}" stroke="#1d2124" stroke-width="1"/>
+    <path d="${area}" fill="url(#${lastVal >= 0 ? 'fgUp' : 'fgDn'})" stroke="none"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+  `;
 }
 
 // ── render functions ──────────────────────────────────────────
@@ -218,8 +328,13 @@ function renderAccount(data, priceMap = {}) {
   renderLitStaking(data.lit_staking || {});
 
   // prime history state — loads on tab click
-  _histAddress = data.l1_address || '';
+  _histAddress      = data.l1_address || '';
   _histAccountIndex = idx;
+
+  // background fetch for flow chart
+  _flowPeriod = 'all';
+  $$('[data-flow-period]').forEach(b => b.classList.toggle('active', b.dataset.flowPeriod === 'all'));
+  fetchFillsBackground(_histAddress, idx);
   _histOffset = 0;
   $('#litHistBody').innerHTML = `<tr><td colspan="7" class="empty">click the "Trade History" tab to load</td></tr>`;
   $('#histPrevBtn').style.display = 'none';
@@ -236,16 +351,34 @@ function renderPositions(positions, totalPortfolio = 0) {
 
   positions.sort((a, b) => Math.abs(parseFloat(b.position_value)) - Math.abs(parseFloat(a.position_value)));
 
+  let totalLong = 0, totalShort = 0, totalPnl = 0, totalFunding = 0;
+  positions.forEach(p => {
+    const isLong = parseInt(p.sign) >= 0;
+    const v = Math.abs(parseFloat(p.position_value || 0));
+    if (isLong) totalLong += v; else totalShort += v;
+    totalPnl     += parseFloat(p.unrealized_pnl || 0);
+    totalFunding += parseFloat(p.total_funding_paid_out || 0);
+  });
+
   tbody.innerHTML = positions.map(p => {
-    const isLong  = parseInt(p.sign) >= 0;
-    const size    = parseFloat(p.position);
-    const pnl     = parseFloat(p.unrealized_pnl || 0);
-    const funding = parseFloat(p.total_funding_paid_out || 0);
-    const posVal  = Math.abs(parseFloat(p.position_value || 0));
-    const pnlCls  = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-    const sideCls = isLong ? 'pos-long' : 'pos-short';
-    const liqPrice = parseFloat(p.liquidation_price);
-    const liqDisplay = liqPrice > 0 ? '$' + liqPrice.toFixed(4) : '—';
+    const isLong   = parseInt(p.sign) >= 0;
+    const size     = parseFloat(p.position);
+    const pnl      = parseFloat(p.unrealized_pnl || 0);
+    const funding  = parseFloat(p.total_funding_paid_out || 0);
+    const posVal   = Math.abs(parseFloat(p.position_value || 0));
+    const pnlCls   = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const sideCls  = isLong ? 'pos-long' : 'pos-short';
+    const roe      = posVal > 0 ? pnl / posVal * 100 : 0;
+    const roeSign  = roe >= 0 ? '+' : '';
+
+    const liqPrice  = parseFloat(p.liquidation_price);
+    const markPrice = posVal > 0 && Math.abs(size) > 0 ? posVal / Math.abs(size) : 0;
+    const distPct   = liqPrice > 0 && markPrice > 0
+      ? Math.abs(markPrice - liqPrice) / markPrice * 100
+      : null;
+    const distColor = distPct === null ? '' : distPct < 8 ? '#ff6a77' : distPct < 18 ? '#f2c14e' : '#6fe089';
+    const liqDisplay = liqPrice > 0 ? `$${liqPrice.toFixed(4)}` : '—';
+
     const allocPct = totalPortfolio > 0 ? (posVal / totalPortfolio * 100) : 0;
     const allocBar = `<div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
       <div style="width:50px;height:4px;background:var(--line);border-radius:2px">
@@ -260,12 +393,38 @@ function renderPositions(positions, totalPortfolio = 0) {
       <td class="num ${sideCls}">${fmtNum(size, 2)}</td>
       <td class="num">$${fmtNum(parseFloat(p.avg_entry_price), 4)}</td>
       <td class="num">${fmtUsd(posVal)}</td>
-      <td class="num ${pnlCls}" style="font-weight:600">${fmtUsd(pnl)}</td>
-      <td class="num" style="color:var(--red)">${liqDisplay}</td>
+      <td class="num ${pnlCls}" style="font-weight:600">
+        <div>${fmtUsd(pnl)}</div>
+        ${posVal > 0 ? `<div style="font-size:10px;margin-top:1px;opacity:.8">${roeSign}${roe.toFixed(1)}%</div>` : ''}
+      </td>
+      <td class="num">
+        <div style="color:var(--red)">${liqDisplay}</div>
+        ${distPct !== null ? `
+        <div style="margin-top:3px">
+          <div style="width:54px;height:3px;background:var(--line);border-radius:2px;margin-left:auto">
+            <div style="height:100%;width:${Math.min(distPct,100).toFixed(1)}%;background:${distColor};border-radius:2px"></div>
+          </div>
+          <div style="font-size:9px;color:${distColor};margin-top:1px">${distPct.toFixed(1)}% away</div>
+        </div>` : ''}
+      </td>
       <td class="num" style="color:var(--ink-dim)">${funding !== 0 ? fmtUsd(funding) : '—'}</td>
       <td class="num">${allocBar}</td>
     </tr>`;
   }).join('');
+
+  const sumPnlColor = totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  tbody.innerHTML += `<tr style="border-top:1px solid var(--line-2);background:rgba(224,255,107,0.02)">
+    <td colspan="9" style="padding:9px 8px">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px;align-items:baseline">
+        <span style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)">Summary</span>
+        <span><span style="font-size:9px;color:var(--ink-faint)">Long </span><span style="color:var(--green);font-weight:600">${fmtUsd(totalLong)}</span></span>
+        <span><span style="font-size:9px;color:var(--ink-faint)">Short </span><span style="color:var(--red);font-weight:600">${fmtUsd(totalShort)}</span></span>
+        <span style="color:var(--line-2)">·</span>
+        <span><span style="font-size:9px;color:var(--ink-faint)">Unrealized PnL </span><span style="font-weight:700;color:${sumPnlColor}">${(totalPnl >= 0 ? '+' : '') + fmtUsd(totalPnl)}</span></span>
+        <span><span style="font-size:9px;color:var(--ink-faint)">Funding </span><span style="color:var(--ink-dim)">${totalFunding !== 0 ? fmtUsd(totalFunding) : '—'}</span></span>
+      </div>
+    </td>
+  </tr>`;
 }
 
 function renderAssets(assets, priceMap = {}, totalPortfolio = 0) {
@@ -465,7 +624,17 @@ async function loadHistory(offset = 0) {
   }
 }
 
-// wire history market filter buttons
+// ── flow period buttons ───────────────────────────────────────
+
+$$('[data-flow-period]').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('[data-flow-period]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    renderFlowChart(b.dataset.flowPeriod);
+  });
+});
+
+// ── history market filter buttons ─────────────────────────────
 $$('[data-hist-market]').forEach(b => {
   b.addEventListener('click', () => {
     $$('[data-hist-market]').forEach(x => x.classList.remove('active'));
