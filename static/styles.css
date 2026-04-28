@@ -148,6 +148,14 @@ footer .spacer{margin-left:auto}
 .nav-pill-hdr:hover{border-color:var(--accent);color:var(--ink)}
 .hdr-nav-mobile{display:none}
 
+/* ── market table row interaction ──────────────────────── */
+#mktBody tr[data-mid]{cursor:pointer}
+#mktBody tr[data-mid]:hover{background:rgba(224,255,107,0.04)}
+#mktBody tr[data-mid].selected{
+  background:rgba(224,255,107,0.07) !important;
+  box-shadow:inset 3px 0 0 var(--accent);
+}
+
 /* ── chart button in market table ──────────────────────── */
 .chart-btn{
   color:var(--ink-faint);font-size:14px;line-height:1;

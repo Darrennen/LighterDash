@@ -16,7 +16,7 @@ const state = {
   pollTimer: null,
   tickCount: 0,
   lastPrices: new Map(),
-  drawer: { marketId: null, field: 'funding', hours: 24 },
+  drawer: { marketId: null, field: 'candles', hours: 24 },
 };
 
 const $ = s => document.querySelector(s);
@@ -130,7 +130,7 @@ function renderMarkets() {
     th.classList.toggle('asc', state.sortDir === 1);
   });
 
-  // attach chart buttons
+  // attach chart buttons (stop propagation so row click doesn't double-fire)
   $$('.chart-btn').forEach(b => {
     b.addEventListener('click', e => {
       e.stopPropagation();
@@ -263,25 +263,184 @@ function renderLiqs() {
 async function openDrawer(marketId) {
   state.drawer.marketId = marketId;
   const m = state.marketsById.get(marketId);
-  $('#drawerTitle').innerHTML = `<span class="sym">${m ? m.symbol : 'MKT-' + marketId}</span> · history`;
+
+  // title
+  $('#drawerTitle').innerHTML = m
+    ? `<span class="sym">${m.symbol}</span>`
+    : `MKT-${marketId}`;
+
+  // market stats bar
+  if (m) {
+    const chgCls = m.price_change > 0 ? 'up' : m.price_change < 0 ? 'down' : '';
+    const fCls = (m.funding ?? 0) > 0 ? 'up' : (m.funding ?? 0) < 0 ? 'down' : '';
+    $('#drawerMktBar').innerHTML = `
+      <span style="font-size:14px;font-weight:700;color:var(--ink)">${fmtUsd(m.last_price)}</span>
+      <span class="${chgCls}">${fmtPct(m.price_change)} 24h</span>
+      <span style="color:var(--ink-faint)">Vol ${fmtUsd(m.volume_24h)}</span>
+      ${m.funding != null ? `<span class="${fCls}">Fund ${(m.funding*100).toFixed(4)}%</span>` : ''}
+      <span style="color:var(--ink-faint)">${Number(m.trades_24h).toLocaleString()} trades</span>
+    `;
+  } else {
+    $('#drawerMktBar').innerHTML = '';
+  }
+
+  // highlight selected row
+  $$('#mktBody tr.selected').forEach(r => r.classList.remove('selected'));
+  const row = document.querySelector(`#mktBody tr[data-mid="${marketId}"]`);
+  if (row) row.classList.add('selected');
+
   $('#drawer').classList.add('open');
   await loadDrawerChart();
+  renderDrawerTrades(marketId);
 }
 
 function closeDrawer() {
   $('#drawer').classList.remove('open');
+  $$('#mktBody tr.selected').forEach(r => r.classList.remove('selected'));
   state.drawer.marketId = null;
 }
 
 async function loadDrawerChart() {
   if (state.drawer.marketId == null) return;
   const { marketId, field, hours } = state.drawer;
-  try {
-    const j = await apiGet(`/api/history/${marketId}?field=${field}&hours=${hours}`);
-    drawChart(j.points, field);
-  } catch (e) {
-    drawChart([], field);
+
+  if (field === 'candles') {
+    // map hours → resolution + count
+    const resMap = { 24: ['1h', 24], 72: ['4h', 18], 168: ['1d', 7] };
+    const [res, cnt] = resMap[hours] || ['1h', 24];
+    try {
+      const j = await apiGet(`/api/candles/${marketId}?resolution=${res}&count=${cnt}`);
+      drawCandleChart(j.candles || []);
+    } catch (e) {
+      drawCandleChart([]);
+    }
+  } else {
+    try {
+      const j = await apiGet(`/api/history/${marketId}?field=${field}&hours=${hours}`);
+      drawChart(j.points, field);
+    } catch (e) {
+      drawChart([], field);
+    }
   }
+}
+
+// ── candlestick chart ────────────────────────────────────────
+function drawCandleChart(rawCandles) {
+  const svg = $('#chart');
+  const stats = $('#chartStats');
+  const W = 800, H = 260;
+  const pad = { t: 16, r: 16, b: 28, l: 64 };
+  const cW = W - pad.l - pad.r;
+  const cH = H - pad.t - pad.b;
+
+  svg.innerHTML = '';
+  stats.innerHTML = '';
+
+  if (!rawCandles.length) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:12px">no candle data available</text>`;
+    return;
+  }
+
+  const norm = c => ({
+    t: c.t || c.time || c.timestamp || c.open_time || 0,
+    o: parseFloat(c.o ?? c.open),
+    h: parseFloat(c.h ?? c.high),
+    l: parseFloat(c.l ?? c.low),
+    c: parseFloat(c.c ?? c.close),
+    v: parseFloat(c.v ?? c.volume ?? 0),
+  });
+  const data = rawCandles.map(norm).filter(c => !isNaN(c.o) && !isNaN(c.c));
+  if (!data.length) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:12px">candle data format unrecognised</text>`;
+    return;
+  }
+
+  const yMin = Math.min(...data.map(c => c.l));
+  const yMax = Math.max(...data.map(c => c.h));
+  const yRange = yMax - yMin || 0.001;
+  const yPad = yRange * 0.06;
+  const y0 = yMin - yPad, y1 = yMax + yPad;
+  const sy = v => pad.t + (1 - (v - y0) / (y1 - y0)) * cH;
+
+  const n = data.length;
+  const slotW = cW / n;
+  const bodyW = Math.max(2, slotW * 0.55);
+
+  let out = '';
+
+  // y-axis grid + labels
+  for (let i = 0; i <= 4; i++) {
+    const v = y0 + ((y1 - y0) * i) / 4;
+    const y = sy(v).toFixed(1);
+    out += `<line x1="${pad.l}" x2="${W-pad.r}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+    out += `<text x="${pad.l-6}" y="${parseFloat(y)+4}" text-anchor="end" fill="var(--ink-faint)" style="font-size:10px;font-family:'JetBrains Mono',monospace">${fmtUsd(v)}</text>`;
+  }
+
+  // candles
+  data.forEach((c, i) => {
+    const cx = (pad.l + (i + 0.5) * slotW).toFixed(1);
+    const isUp = c.c >= c.o;
+    const col = isUp ? 'var(--green)' : 'var(--red)';
+    const bTop = sy(Math.max(c.o, c.c)).toFixed(1);
+    const bBot = sy(Math.min(c.o, c.c)).toFixed(1);
+    const bH = Math.max(1, parseFloat(bBot) - parseFloat(bTop)).toFixed(1);
+    const bX = (parseFloat(cx) - bodyW / 2).toFixed(1);
+    const wTop = sy(c.h).toFixed(1);
+    const wBot = sy(c.l).toFixed(1);
+    const ts = c.t > 1e12 ? c.t : c.t * 1000;
+    const timeLbl = new Date(ts).toLocaleString('en-GB', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    out += `<line x1="${cx}" x2="${cx}" y1="${wTop}" y2="${wBot}" stroke="${col}" stroke-width="1" opacity="0.6"/>`;
+    out += `<rect x="${bX}" y="${bTop}" width="${bodyW.toFixed(1)}" height="${bH}" fill="${col}" opacity="0.9">
+      <title>${timeLbl}  O:${fmtUsd(c.o)}  H:${fmtUsd(c.h)}  L:${fmtUsd(c.l)}  C:${fmtUsd(c.c)}</title></rect>`;
+  });
+
+  // x-axis labels at ~4 points
+  const step = Math.max(1, Math.floor(n / 4));
+  for (let i = 0; i < n; i += step) {
+    const c = data[i];
+    const x = (pad.l + (i + 0.5) * slotW).toFixed(1);
+    const ts = c.t > 1e12 ? c.t : c.t * 1000;
+    const lbl = new Date(ts).toLocaleString('en-GB', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    out += `<text x="${x}" y="${H-8}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:10px;font-family:'JetBrains Mono',monospace">${lbl}</text>`;
+  }
+
+  svg.innerHTML = out;
+
+  // stats bar (last candle OHLC)
+  const last = data[data.length - 1];
+  const first = data[0];
+  const chg = first.o !== 0 ? ((last.c - first.o) / Math.abs(first.o)) * 100 : 0;
+  const chgCls = chg >= 0 ? 'up' : 'down';
+  stats.innerHTML = `
+    <span><span class="section-lbl" style="display:inline">O</span> ${fmtUsd(last.o)}</span>
+    <span><span class="section-lbl" style="display:inline">H</span> <span class="up">${fmtUsd(last.h)}</span></span>
+    <span><span class="section-lbl" style="display:inline">L</span> <span class="down">${fmtUsd(last.l)}</span></span>
+    <span><span class="section-lbl" style="display:inline">C</span> ${fmtUsd(last.c)}</span>
+    <span class="${chgCls}"><span class="section-lbl" style="display:inline">Δ</span> ${fmtPct(chg)}</span>
+    <span style="color:var(--ink-faint)"><span class="section-lbl" style="display:inline">Bars</span> ${n}</span>
+  `;
+}
+
+// ── drawer recent trades ─────────────────────────────────────
+function renderDrawerTrades(marketId) {
+  const tbody = $('#drawerTradesBody');
+  if (!tbody) return;
+  const trades = state.trades.filter(t => t.market_id === marketId).slice(0, 25);
+  if (!trades.length) {
+    tbody.innerHTML = `<tr><td class="empty" colspan="5" style="padding:10px">no recent trades in buffer</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = trades.map(t => {
+    const isBuy = t.side === 'buy';
+    const big = t.usd >= 50000;
+    return `<tr style="${big ? 'background:rgba(224,255,107,0.03)' : ''}">
+      <td style="padding:4px 6px;color:var(--ink-faint)">${fmtTime(t.ts)}</td>
+      <td style="padding:4px 6px"><span class="pill ${t.side}" style="font-size:9px;padding:1px 5px">${t.side}</span></td>
+      <td style="padding:4px 6px;text-align:right;font-variant-numeric:tabular-nums">${fmtUsd(t.price)}</td>
+      <td style="padding:4px 6px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-dim)">${fmtNum(t.size, 3)}</td>
+      <td style="padding:4px 6px;text-align:right;font-variant-numeric:tabular-nums;font-weight:${big?'700':'400'};color:${isBuy?'var(--green)':'var(--red)'}">${fmtUsd(t.usd)}</td>
+    </tr>`;
+  }).join('');
 }
 
 function drawChart(points, field) {
@@ -429,9 +588,23 @@ $$('.controls .btn').forEach(b => {
   });
 });
 
+// row click → open drawer
+$('#mktBody').addEventListener('click', e => {
+  const tr = e.target.closest('tr[data-mid]');
+  if (!tr) return;
+  openDrawer(Number(tr.dataset.mid));
+});
+
 // drawer events
 $('#drawerClose').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+function _syncTimeLabels() {
+  const isCandles = state.drawer.field === 'candles';
+  $$('.drawer-tabs [data-hours]').forEach(b => {
+    b.textContent = isCandles ? (b.dataset.lblCandles || b.dataset.hours) : (b.dataset.lblLine || b.dataset.hours);
+  });
+}
 
 $$('.drawer-tabs .btn-sm').forEach(b => {
   b.addEventListener('click', () => {
@@ -441,6 +614,7 @@ $$('.drawer-tabs .btn-sm').forEach(b => {
       state.drawer.field = field;
       $$('.drawer-tabs [data-field]').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
+      _syncTimeLabels();
     } else if (hours) {
       state.drawer.hours = Number(hours);
       $$('.drawer-tabs [data-hours]').forEach(x => x.classList.remove('active'));
@@ -451,5 +625,6 @@ $$('.drawer-tabs .btn-sm').forEach(b => {
 });
 
 // ── boot ─────────────────────────────────────────────────────
+_syncTimeLabels();  // set "1H / 4H / 1D" labels for default candles mode
 pollOnce();
 schedule();

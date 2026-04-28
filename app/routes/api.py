@@ -144,6 +144,19 @@ async def flow(limit: int = Query(500, ge=10, le=1000)):
     }
 
 
+@router.get("/candles/{market_id}")
+async def candles(
+    market_id: int,
+    resolution: str = Query("1h"),
+    count: int = Query(50, ge=5, le=200),
+):
+    from app.services.lighter_client import client
+    await _maybe_refresh()
+    data = await client.candles(market_id, resolution=resolution, count=count)
+    symbol = store.markets_by_id.get(market_id, {}).get("symbol", f"MKT-{market_id}")
+    return {"market_id": market_id, "symbol": symbol, "resolution": resolution, "candles": data}
+
+
 @router.get("/history/{market_id}")
 async def history(
     market_id: int,

@@ -176,22 +176,34 @@
 <!-- history drawer -->
 <div id="drawer" class="drawer">
   <div class="drawer-head">
-    <span id="drawerTitle">History</span>
+    <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+      <span id="drawerTitle">History</span>
+      <div id="drawerMktBar" style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--ink-dim)"></div>
+    </div>
     <div class="drawer-tabs">
-      <button class="btn-sm active" data-field="funding">Funding</button>
+      <button class="btn-sm active" data-field="candles">Candles</button>
+      <button class="btn-sm" data-field="funding">Funding</button>
       <button class="btn-sm" data-field="oi_usd">OI</button>
       <button class="btn-sm" data-field="last_price">Price</button>
     </div>
     <div class="drawer-tabs" style="margin-left:auto">
-      <button class="btn-sm active" data-hours="24">24h</button>
-      <button class="btn-sm" data-hours="72">3d</button>
-      <button class="btn-sm" data-hours="168">7d</button>
+      <button class="btn-sm active" data-hours="24" data-lbl-line="24h" data-lbl-candles="1H">24h</button>
+      <button class="btn-sm" data-hours="72" data-lbl-line="3d" data-lbl-candles="4H">3d</button>
+      <button class="btn-sm" data-hours="168" data-lbl-line="7d" data-lbl-candles="1D">7d</button>
     </div>
     <button class="drawer-close" id="drawerClose">×</button>
   </div>
   <div class="drawer-body">
     <svg id="chart" viewBox="0 0 800 260" preserveAspectRatio="none"></svg>
     <div id="chartStats" class="chart-stats"></div>
+    <div id="drawerTradesWrap" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+      <div class="section-lbl" style="margin-bottom:8px">Recent Trades</div>
+      <div style="max-height:200px;overflow:auto;-webkit-overflow-scrolling:touch">
+        <table style="font-size:11px;width:100%;border-collapse:collapse">
+          <tbody id="drawerTradesBody"><tr><td class="empty" colspan="5">select a market</td></tr></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 
