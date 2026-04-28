@@ -122,18 +122,26 @@ class LighterClient:
     async def candles(
         self, market_id: int, resolution: str = "1h", count: int = 24
     ) -> list[dict]:
+        import time as _time
+        res_secs = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+        bucket = res_secs.get(resolution, 3600)
+        end_ms   = int(_time.time() * 1000)
+        start_ms = end_ms - bucket * count * 1000
         try:
             j = await self._get(
                 "/candles",
                 params={
                     "market_id": market_id,
                     "resolution": resolution,
+                    "start_timestamp": start_ms,
+                    "end_timestamp": end_ms,
                     "count_back": count,
                 },
             )
         except httpx.HTTPError:
             return []
-        return j.get("candlesticks") or j.get("candles") or j.get("data") or []
+        raw = j.get("c") or j.get("candlesticks") or j.get("candles") or j.get("data") or []
+        return raw
 
     async def order_book(self, market_id: int) -> dict:
         """Single-market order book snapshot with bid/ask depth levels."""

@@ -82,6 +82,46 @@ async def write_history(rows: Iterable[dict[str, Any]]) -> None:
         await db.commit()
 
 
+async def fetch_candles(
+    market_id: int, resolution: str = "1h", count: int = 24
+) -> list[dict[str, Any]]:
+    """Build OHLC candles from local market_history snapshots."""
+    bucket_secs = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+    bucket = bucket_secs.get(resolution, 3600)
+    since = int(time.time()) - bucket * (count + 1)  # +1 so first bucket has context
+
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """SELECT ts, last_price FROM market_history
+               WHERE market_id = ? AND ts >= ? AND last_price IS NOT NULL
+               ORDER BY ts ASC""",
+            (market_id, since),
+        )
+        rows = await cur.fetchall()
+
+    if not rows:
+        return []
+
+    buckets: dict[int, list[float]] = {}
+    for ts, price in rows:
+        b = (ts // bucket) * bucket
+        buckets.setdefault(b, []).append(float(price))
+
+    candles = []
+    for b_ts in sorted(buckets):
+        prices = buckets[b_ts]
+        candles.append({
+            "t": b_ts * 1000,
+            "o": prices[0],
+            "h": max(prices),
+            "l": min(prices),
+            "c": prices[-1],
+            "v": 0.0,
+        })
+
+    return candles[-count:]
+
+
 async def fetch_history(
     market_id: int, hours: int = 24, field: str = "funding"
 ) -> list[dict[str, Any]]:

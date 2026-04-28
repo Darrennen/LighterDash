@@ -148,12 +148,15 @@ async def flow(limit: int = Query(500, ge=10, le=1000)):
 async def candles(
     market_id: int,
     resolution: str = Query("1h"),
-    count: int = Query(50, ge=5, le=200),
+    count: int = Query(24, ge=1, le=200),
 ):
     from app.services.lighter_client import client
-    await _maybe_refresh()
-    data = await client.candles(market_id, resolution=resolution, count=count)
+    from app.db import fetch_candles as fetch_local_candles
     symbol = store.markets_by_id.get(market_id, {}).get("symbol", f"MKT-{market_id}")
+    # Try the Lighter API first; fall back to local snapshots
+    data = await client.candles(market_id, resolution=resolution, count=count)
+    if not data:
+        data = await fetch_local_candles(market_id, resolution=resolution, count=count)
     return {"market_id": market_id, "symbol": symbol, "resolution": resolution, "candles": data}
 
 
