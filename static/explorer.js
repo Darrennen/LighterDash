@@ -24,6 +24,7 @@ const fmtMYT = ts => {
 const truncAddr = a => a ? a.slice(0, 6) + '…' + a.slice(-4) : '—';
 
 let _currentAccountIndex = null;
+let _portfolioValue = 0;  // used by renderPositions for allocation bars
 
 // ── tab switching ─────────────────────────────────────────────
 
@@ -42,6 +43,141 @@ $$('.tab').forEach(tab => {
     }
   });
 });
+
+// ── portfolio summary ─────────────────────────────────────────
+
+function renderPortfolioSummary(data, priceMap = {}) {
+  const positions = data.positions || [];
+  const assets    = data.assets || [];
+  const staking   = data.lit_staking || {};
+  const collateral = parseFloat(data.collateral || 0);
+  const avail      = parseFloat(data.available_balance || 0);
+
+  const apiVal    = parseFloat(data.total_asset_value || 0);
+  const spotEst   = assets.reduce((s, a) => s + parseFloat(a.balance || 0) * (priceMap[a.symbol] ?? 0), 0);
+  const portfolio = apiVal > 0 ? apiVal : collateral + spotEst;
+  _portfolioValue = portfolio;
+
+  const totalPosVal  = positions.reduce((s, p) => s + Math.abs(parseFloat(p.position_value || 0)), 0);
+  const stakingVal   = parseFloat(staking.staked_usdc_value || 0);
+  const unrealPnl    = positions.reduce((s, p) => s + parseFloat(p.unrealized_pnl || 0), 0);
+  const leverage     = collateral > 0 ? totalPosVal / collateral : 0;
+
+  // bias
+  let longVal = 0, shortVal = 0;
+  positions.forEach(p => {
+    const v = Math.abs(parseFloat(p.position_value || 0));
+    if (parseInt(p.sign || 0) >= 0) longVal += v; else shortVal += v;
+  });
+  const biasTotal = longVal + shortVal;
+  const longPct   = biasTotal > 0 ? longVal / biasTotal * 100 : 50;
+  let biasLabel, biasColor;
+  if (biasTotal === 0)     { biasLabel = 'No Positions'; biasColor = 'var(--ink-faint)'; }
+  else if (longPct > 75)   { biasLabel = '▲ Strong Long';   biasColor = 'var(--green)'; }
+  else if (longPct > 55)   { biasLabel = '↑ Slightly Long'; biasColor = 'var(--green)'; }
+  else if (longPct > 45)   { biasLabel = '→ Balanced';      biasColor = 'var(--ink-dim)'; }
+  else if (longPct > 25)   { biasLabel = '↓ Slightly Short';biasColor = 'var(--red)'; }
+  else                      { biasLabel = '▼ Strong Short';  biasColor = 'var(--red)'; }
+
+  // equity
+  $('#cardPortfolio').textContent = fmtUsd(portfolio);
+  $('#cardCollateral').textContent = fmtUsd(collateral);
+  $('#cardAvail').textContent = fmtUsd(avail);
+  $('#cardOrders').textContent = data.pending_order_count ?? '—';
+
+  // allocation bar
+  const tot = portfolio || 1;
+  const perpPct  = Math.min((totalPosVal / tot * 100), 100).toFixed(1);
+  const stakePct = Math.min((stakingVal  / tot * 100), 100).toFixed(1);
+  const freePct  = Math.max(0, 100 - parseFloat(perpPct) - parseFloat(stakePct)).toFixed(1);
+  const dot = color => `<span style="display:inline-block;width:8px;height:8px;background:${color};border-radius:1px;margin-right:4px;vertical-align:middle"></span>`;
+  $('#pAllocBar').innerHTML = `
+    <div style="width:${perpPct}%;background:var(--blue);transition:width .4s"></div>
+    <div style="width:${stakePct}%;background:var(--amber);transition:width .4s"></div>
+    <div style="flex:1;background:var(--green);opacity:.5"></div>`;
+  $('#pAllocLabels').innerHTML =
+    `<span>${dot('var(--blue)')}Perps ${perpPct}%</span>` +
+    (stakingVal > 0 ? `<span>${dot('var(--amber)')}Staking ${stakePct}%</span>` : '') +
+    `<span>${dot('var(--green)')}Free ${freePct}%</span>`;
+
+  // bias
+  const biasEl = $('#pBias');
+  biasEl.textContent = biasLabel;
+  biasEl.style.color = biasColor;
+  $('#pBiasFill').style.width = longPct + '%';
+  $('#pBiasFill').style.background = longPct > 50 ? 'var(--green)' : 'var(--red)';
+
+  // leverage
+  const levColor = leverage > 10 ? 'var(--red)' : leverage > 5 ? 'var(--amber)' : 'var(--green)';
+  const levEl = $('#pLeverage');
+  levEl.textContent = leverage > 0 ? leverage.toFixed(1) + 'x' : '—';
+  levEl.style.color = levColor;
+  $('#pLevFill').style.width = Math.min(leverage / 20 * 100, 100) + '%';
+  $('#pLevFill').style.background = levColor;
+
+  // unrealized pnl
+  const pnlEl = $('#pUnrealPnl');
+  pnlEl.textContent = unrealPnl !== 0 ? (unrealPnl >= 0 ? '+' : '') + fmtUsd(unrealPnl) : '—';
+  pnlEl.style.color = unrealPnl > 0 ? 'var(--green)' : unrealPnl < 0 ? 'var(--red)' : '';
+
+  // chart
+  drawPosPnlChart(positions);
+}
+
+function drawPosPnlChart(positions) {
+  const svg   = $('#posPnlChart');
+  const empty = $('#posPnlEmpty');
+  if (!svg) return;
+
+  const withPnl = positions.filter(p => Math.abs(parseFloat(p.unrealized_pnl || 0)) > 0.001);
+  if (!withPnl.length) {
+    svg.style.display = 'none';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  svg.style.display = 'block';
+
+  const barH   = 26;
+  const gap    = 8;
+  const labelW = 72;
+  const n      = withPnl.length;
+  const H      = n * (barH + gap) - gap + 4;
+  const W      = 560;
+  const midX   = W / 2;
+  const halfW  = midX - labelW - 10;
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.style.height = H + 'px';
+
+  const maxAbs = Math.max(...withPnl.map(p => Math.abs(parseFloat(p.unrealized_pnl))), 1);
+  let out = `<line x1="${midX}" y1="0" x2="${midX}" y2="${H}" stroke="var(--line-2)" stroke-width="1" stroke-dasharray="3 3"/>`;
+
+  withPnl.sort((a, b) => parseFloat(b.unrealized_pnl) - parseFloat(a.unrealized_pnl));
+
+  withPnl.forEach((p, i) => {
+    const pnl  = parseFloat(p.unrealized_pnl);
+    const y    = i * (barH + gap);
+    const isP  = pnl >= 0;
+    const col  = isP ? 'var(--green)' : 'var(--red)';
+    const bW   = Math.max(2, Math.abs(pnl) / maxAbs * halfW);
+    const bX   = isP ? midX : midX - bW;
+    const cx   = midX;
+    const pnlFmt = (pnl >= 0 ? '+' : '') + fmtUsd(pnl);
+
+    out += `<rect x="${bX.toFixed(1)}" y="${y+2}" width="${bW.toFixed(1)}" height="${barH-4}" fill="${col}" opacity="0.75" rx="2"/>`;
+    // symbol label centered at midline
+    out += `<text x="${cx - 8}" y="${y + barH/2 + 4}" text-anchor="end" fill="var(--ink)" style="font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:700">${p.symbol}</text>`;
+    // pnl value outside bar
+    if (isP) {
+      out += `<text x="${(bX + bW + 7).toFixed(1)}" y="${y + barH/2 + 4}" fill="${col}" style="font-size:10px;font-family:'JetBrains Mono',monospace">${pnlFmt}</text>`;
+    } else {
+      out += `<text x="${(bX - 7).toFixed(1)}" y="${y + barH/2 + 4}" text-anchor="end" fill="${col}" style="font-size:10px;font-family:'JetBrains Mono',monospace">${pnlFmt}</text>`;
+    }
+  });
+
+  svg.innerHTML = out;
+}
 
 // ── render functions ──────────────────────────────────────────
 
@@ -69,27 +205,16 @@ function renderAccount(data, priceMap = {}) {
     : '';
   $('#acctStatus').innerHTML = `<span style="color:${statusColor};font-size:12px">${statusLabel}</span>${stakingBadge}`;
 
-  // Portfolio value: API may return 0 for spot-only accounts that haven't
-  // deposited USDC collateral. Fall back to estimating from spot asset values.
-  const apiPortfolio = parseFloat(data.total_asset_value || 0);
-  const spotEstimate = (data.assets || []).reduce((sum, a) => {
-    const price = priceMap[a.symbol] ?? 0;
-    return sum + parseFloat(a.balance || 0) * price;
-  }, 0);
-  const collateral = parseFloat(data.collateral || 0);
-  const portfolioValue = apiPortfolio > 0 ? apiPortfolio : collateral + spotEstimate;
-  $('#cardPortfolio').textContent = fmtUsd(portfolioValue);
-  if (apiPortfolio === 0 && spotEstimate > 0) {
-    // show that this is an estimate
-    $('#cardPortfolio').title = 'Estimated from spot token balances × current prices';
-    $('#cardPortfolio').style.opacity = '0.85';
-  }
-  $('#cardCollateral').textContent = fmtUsd(collateral);
-  $('#cardAvail').textContent = fmtUsd(parseFloat(data.available_balance || 0));
-  $('#cardOrders').textContent = data.pending_order_count ?? '—';
+  renderPortfolioSummary(data, priceMap);
 
-  renderPositions(data.positions || []);
-  renderAssets(data.assets || [], priceMap);
+  // tab counts
+  const positions = data.positions || [];
+  const assets    = data.assets    || [];
+  $('[data-tab="positions"]').textContent  = `Positions${positions.length ? ' (' + positions.length + ')' : ''}`;
+  $('[data-tab="assets"]').textContent     = `Assets${assets.length ? ' (' + assets.length + ')' : ''}`;
+
+  renderPositions(positions, _portfolioValue);
+  renderAssets(assets, priceMap, _portfolioValue);
   renderLitStaking(data.lit_staking || {});
 
   // prime history state — loads on tab click
@@ -102,60 +227,83 @@ function renderAccount(data, priceMap = {}) {
   $('#histPageInfo').textContent = '';
 }
 
-function renderPositions(positions) {
+function renderPositions(positions, totalPortfolio = 0) {
   const tbody = $('#posBody');
   if (!positions.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="empty">no open positions</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty">no open positions</td></tr>`;
     return;
   }
 
-  // sort by abs position value desc
   positions.sort((a, b) => Math.abs(parseFloat(b.position_value)) - Math.abs(parseFloat(a.position_value)));
 
   tbody.innerHTML = positions.map(p => {
-    const isLong = parseInt(p.sign) >= 0;
-    const size = parseFloat(p.position);
-    const pnl = parseFloat(p.unrealized_pnl || 0);
+    const isLong  = parseInt(p.sign) >= 0;
+    const size    = parseFloat(p.position);
+    const pnl     = parseFloat(p.unrealized_pnl || 0);
     const funding = parseFloat(p.total_funding_paid_out || 0);
-    const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const posVal  = Math.abs(parseFloat(p.position_value || 0));
+    const pnlCls  = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
     const sideCls = isLong ? 'pos-long' : 'pos-short';
     const liqPrice = parseFloat(p.liquidation_price);
     const liqDisplay = liqPrice > 0 ? '$' + liqPrice.toFixed(4) : '—';
+    const allocPct = totalPortfolio > 0 ? (posVal / totalPortfolio * 100) : 0;
+    const allocBar = `<div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+      <div style="width:50px;height:4px;background:var(--line);border-radius:2px">
+        <div style="height:100%;width:${Math.min(allocPct,100).toFixed(1)}%;background:var(--blue);border-radius:2px"></div>
+      </div>
+      <span style="min-width:32px;text-align:right;color:var(--ink-dim)">${allocPct.toFixed(1)}%</span>
+    </div>`;
 
     return `<tr>
       <td style="font-weight:600">${p.symbol}</td>
       <td><span class="pill ${isLong ? 'buy' : 'sell'}">${isLong ? 'long' : 'short'}</span></td>
       <td class="num ${sideCls}">${fmtNum(size, 2)}</td>
       <td class="num">$${fmtNum(parseFloat(p.avg_entry_price), 4)}</td>
-      <td class="num">${fmtUsd(parseFloat(p.position_value))}</td>
+      <td class="num">${fmtUsd(posVal)}</td>
       <td class="num ${pnlCls}" style="font-weight:600">${fmtUsd(pnl)}</td>
       <td class="num" style="color:var(--red)">${liqDisplay}</td>
       <td class="num" style="color:var(--ink-dim)">${funding !== 0 ? fmtUsd(funding) : '—'}</td>
+      <td class="num">${allocBar}</td>
     </tr>`;
   }).join('');
 }
 
-function renderAssets(assets, priceMap = {}) {
+function renderAssets(assets, priceMap = {}, totalPortfolio = 0) {
   const tbody = $('#assetBody');
   if (!assets.length) {
-    tbody.innerHTML = `<tr><td colspan="4" class="empty">no spot assets held</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="empty">no spot assets held</td></tr>`;
     return;
   }
 
   let totalUsd = 0;
-  const rows = assets.map(a => {
-    const bal = parseFloat(a.balance);
+  const computed = assets.map(a => {
+    const bal    = parseFloat(a.balance);
     const locked = parseFloat(a.locked_balance || 0);
-    const price = priceMap[a.symbol];
+    const price  = priceMap[a.symbol];
     const usdVal = price != null ? bal * price : null;
     if (usdVal != null) totalUsd += usdVal;
+    return { a, bal, locked, usdVal };
+  });
+
+  const port = totalPortfolio || totalUsd || 1;
+
+  const rows = computed.map(({ a, bal, locked, usdVal }) => {
     const usdDisplay = usdVal != null
       ? `<span style="font-weight:${usdVal >= 1000 ? '600' : '400'}">${fmtUsd(usdVal)}</span>`
       : `<span style="color:var(--ink-faint)">—</span>`;
+    const allocPct = usdVal != null ? Math.min(usdVal / port * 100, 100) : 0;
+    const allocBar = `<div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+      <div style="width:50px;height:4px;background:var(--line);border-radius:2px">
+        <div style="height:100%;width:${allocPct.toFixed(1)}%;background:var(--green);border-radius:2px"></div>
+      </div>
+      <span style="min-width:32px;text-align:right;color:var(--ink-dim)">${allocPct.toFixed(1)}%</span>
+    </div>`;
+
     return `<tr>
       <td style="font-weight:600">${a.symbol}</td>
       <td class="num">${fmtNum(bal, 6)}</td>
       <td class="num">${usdDisplay}</td>
+      <td class="num">${allocBar}</td>
       <td class="num" style="color:${locked > 0 ? 'var(--amber)' : 'var(--ink-faint)'}" title="${locked > 0 ? 'Reserved for pending limit orders' : ''}">${locked > 0 ? fmtNum(locked, 6) : '—'}</td>
     </tr>`;
   }).join('');
@@ -165,7 +313,7 @@ function renderAssets(assets, priceMap = {}) {
         <td style="color:var(--ink-faint);font-size:10px;letter-spacing:.1em;text-transform:uppercase">Total</td>
         <td></td>
         <td class="num">${fmtUsd(totalUsd)}</td>
-        <td></td>
+        <td></td><td></td>
        </tr>`
     : '';
 
