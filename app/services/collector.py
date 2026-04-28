@@ -41,13 +41,8 @@ def _num(x: Any, default: float = 0.0) -> float:
 
 
 def _normalise_markets(
-    books: list[dict], stats: list[dict], fundings: list[dict]
+    details: list[dict], fundings: list[dict]
 ) -> list[dict[str, Any]]:
-    # exchangeStats has no market_id — join by symbol
-    stat_by_symbol: dict[str, dict] = {
-        s["symbol"]: s for s in stats if s.get("symbol")
-    }
-
     fund_by_id: dict[int, float] = {}
     for f in fundings:
         mid = f.get("market_id", f.get("marketId"))
@@ -56,28 +51,30 @@ def _normalise_markets(
             fund_by_id[int(mid)] = _num(rate)
 
     out: list[dict[str, Any]] = []
-    for b in books:
-        mid_raw = b.get("market_id", b.get("marketId"))
+    for d in details:
+        mid_raw = d.get("market_id", d.get("marketId"))
         if mid_raw is None:
             continue
         mid = int(mid_raw)
-        symbol = b.get("symbol") or f"MKT-{mid}"
-        s = stat_by_symbol.get(symbol, {})
-        last = _num(s.get("last_trade_price") or b.get("last_trade_price"))
+        symbol = d.get("symbol") or f"MKT-{mid}"
+        last = _num(d.get("last_trade_price"))
+        oi_base = _num(d.get("open_interest"))
+        oi_usd  = oi_base * last if oi_base and last else 0.0
         out.append(
             {
                 "market_id": mid,
                 "symbol": symbol,
-                "status": b.get("status"),
+                "market_type": d.get("market_type", "perp"),
+                "status": d.get("status"),
                 "last_price": last,
-                "price_high_24h": _num(s.get("daily_price_high")),
-                "price_low_24h": _num(s.get("daily_price_low")),
-                "price_change": _num(s.get("daily_price_change")),
-                "volume_24h": _num(s.get("daily_quote_token_volume")),
-                "base_volume_24h": _num(s.get("daily_base_token_volume")),
-                "trades_24h": int(_num(s.get("daily_trades_count"))),
-                "oi_base": 0.0,
-                "oi_usd": 0.0,
+                "price_high_24h": _num(d.get("daily_price_high")),
+                "price_low_24h": _num(d.get("daily_price_low")),
+                "price_change": _num(d.get("daily_price_change")),
+                "volume_24h": _num(d.get("daily_quote_token_volume")),
+                "base_volume_24h": _num(d.get("daily_base_token_volume")),
+                "trades_24h": int(_num(d.get("daily_trades_count"))),
+                "oi_base": oi_base,
+                "oi_usd": oi_usd,
                 "funding": fund_by_id.get(mid),
             }
         )
@@ -132,12 +129,11 @@ def _normalise_trade(raw: dict, market: dict) -> dict[str, Any] | None:
 
 # ─── main loop ───────────────────────────────────────────────────────
 async def collect_once() -> dict[str, Any]:
-    books, stats, fundings = await asyncio.gather(
-        client.order_books(),
-        client.exchange_stats(),
+    details, fundings = await asyncio.gather(
+        client.order_book_details(),
         client.funding_rates(),
     )
-    markets = _normalise_markets(books, stats, fundings)
+    markets = _normalise_markets(details, fundings)
     store.set_markets(markets)
 
     # Top N by volume → pull trades concurrently

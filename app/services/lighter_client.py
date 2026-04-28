@@ -60,6 +60,13 @@ class LighterClient:
         j = await self._get("/orderBooks")
         return j.get("order_books") or j.get("orderBooks") or j.get("data") or []
 
+    async def order_book_details(self) -> list[dict]:
+        """Richer snapshot: includes open_interest, daily_price_high/low, etc."""
+        j = await self._get("/orderBookDetails")
+        perps = j.get("order_book_details") or []
+        spot  = j.get("spot_order_book_details") or []
+        return perps + spot
+
     async def exchange_stats(self) -> list[dict]:
         j = await self._get("/exchangeStats")
         return (
