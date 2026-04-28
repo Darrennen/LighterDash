@@ -51,6 +51,14 @@ _buybacks_cache: dict | None = None
 _buybacks_cache_ts: float = 0.0
 _BUYBACKS_TTL = 300.0  # 5 min
 
+_staking_stats_cache: dict | None = None
+_staking_stats_cache_ts: float = 0.0
+_STAKING_STATS_TTL = 120.0  # 2 min
+
+_ob_cache: dict | None = None
+_ob_cache_ts: float = 0.0
+_OB_TTL = 2.0  # 2-second cache — callers poll every 3s
+
 # market_id sentinel: None = all LIT markets, 120 = perp, 2049 = spot
 _VALID_MARKETS = {120, 2049}
 
@@ -340,6 +348,85 @@ async def staking_activity(request: Request):
     return result
 
 
+@router.get("/staking-stats")
+async def staking_stats_endpoint():
+    """Pool-wide LIT staking stats: 24h / 7d stake flows and unique stakers."""
+    global _staking_stats_cache, _staking_stats_cache_ts
+    now = time.time()
+    if _staking_stats_cache and now - _staking_stats_cache_ts < _STAKING_STATS_TTL:
+        return _staking_stats_cache
+
+    transfers = await client.staking_pool_transfers(_LIT_STAKING_POOL, limit=100)
+
+    now_ms = int(now * 1000)
+
+    def _parse_ts(raw) -> int:
+        if isinstance(raw, (int, float)):
+            return int(raw) if raw > 1e10 else int(raw * 1000)
+        from datetime import datetime
+        try:
+            return int(datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp() * 1000)
+        except Exception:
+            return 0
+
+    events: list[dict] = []
+    for t in transfers:
+        ts_ms = _parse_ts(
+            t.get("created_at") or t.get("timestamp") or t.get("time") or 0
+        )
+        ev_type = (t.get("type") or "").lower()
+        is_stake = "mint" in ev_type
+        is_unstake = "burn" in ev_type
+        if not (is_stake or is_unstake):
+            continue
+
+        amount = 0.0
+        for key in ("principal_amount", "amount", "usdc_amount", "value"):
+            v = t.get(key)
+            if v is not None:
+                try:
+                    amount = float(v)
+                    break
+                except (TypeError, ValueError):
+                    pass
+
+        account_id = int(
+            t.get("account_index") or t.get("user_account_index") or 0
+        )
+        events.append({
+            "type": "stake" if is_stake else "unstake",
+            "ts_ms": ts_ms,
+            "amount": amount,
+            "account_id": account_id,
+        })
+
+    def _window(cutoff_ms: int) -> dict:
+        w = [e for e in events if e["ts_ms"] >= cutoff_ms]
+        stakes   = [e for e in w if e["type"] == "stake"]
+        unstakes = [e for e in w if e["type"] == "unstake"]
+        stake_usd   = sum(e["amount"] for e in stakes)
+        unstake_usd = sum(e["amount"] for e in unstakes)
+        return {
+            "stakes":           len(stakes),
+            "unstakes":         len(unstakes),
+            "stake_usd":        stake_usd,
+            "unstake_usd":      unstake_usd,
+            "net_usd":          stake_usd - unstake_usd,
+            "unique_accounts":  len({e["account_id"] for e in w}),
+        }
+
+    result = {
+        "h24":          _window(now_ms - 86_400_000),
+        "h168":         _window(now_ms - 7 * 86_400_000),
+        "total_events": len(events),
+        "raw_count":    len(transfers),
+        "ts":           now,
+    }
+    _staking_stats_cache = result
+    _staking_stats_cache_ts = now
+    return result
+
+
 @router.get("/buybacks")
 async def buybacks():
     """Protocol LIT buyback daily stats + treasury balances."""
@@ -352,6 +439,23 @@ async def buybacks():
         _buybacks_cache = data
         _buybacks_cache_ts = now
     return _buybacks_cache or {}
+
+
+@router.get("/orderbook")
+async def orderbook(market_id: int = Query(120)):
+    """Live order book snapshot for one market (default LIT-PERP #120)."""
+    global _ob_cache, _ob_cache_ts
+    now = time.time()
+    if _ob_cache is not None and now - _ob_cache_ts < _OB_TTL:
+        return _ob_cache
+    try:
+        data = await client.order_book(market_id)
+    except Exception as e:
+        log.warning("orderbook fetch failed: %s", e)
+        data = {}
+    _ob_cache = {"market_id": market_id, "ts": int(now * 1000), **data}
+    _ob_cache_ts = now
+    return _ob_cache
 
 
 @router.get("/leaders")

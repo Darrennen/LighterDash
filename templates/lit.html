@@ -203,6 +203,23 @@
   <div id="cvdChart" style="min-height:72px"></div>
 </div>
 
+<!-- Order Book Heatmap -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>Order Book Heatmap
+    <span class="count">LIT-PERP · bid/ask depth over time</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:10px;font-size:10px;color:var(--ink-faint)">
+      <span><span style="display:inline-block;width:10px;height:10px;background:rgba(111,224,137,0.7);vertical-align:middle;margin-right:3px"></span>bids</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:rgba(255,90,90,0.7);vertical-align:middle;margin-right:3px"></span>asks</span>
+    </span>
+  </h2>
+  <canvas id="obHeatmap" style="display:block;width:100%;height:220px;cursor:crosshair"></canvas>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:4px">
+    <span id="hmTimeLabel">waiting for data…</span>
+    <span id="hmMidLabel"></span>
+    <span>now →</span>
+  </div>
+</div>
+
 <!-- TWAP / Pressure alerts -->
 <div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
   <h2>Pressure Alerts · TWAP
@@ -322,6 +339,14 @@
       <tr><td colspan="4" class="empty">loading…</td></tr>
     </tbody>
   </table>
+</div>
+
+<!-- staking stats -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>Staking Pool Stats <span class="count" id="stakingStatsAge"></span></h2>
+  <div id="stakingStatsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)">
+    <div style="background:var(--bg);padding:16px;color:var(--ink-faint);font-size:11px;grid-column:1/-1">loading staking stats…</div>
+  </div>
 </div>
 
 <!-- staking activity feed -->

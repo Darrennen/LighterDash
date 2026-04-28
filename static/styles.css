@@ -139,6 +139,15 @@ footer .spacer{margin-left:auto}
   .row.three{grid-template-columns:1fr}
 }
 
+/* ── header nav links ──────────────────────────────────── */
+.nav-pill-hdr{
+  padding:4px 12px;border:1px solid var(--line-2);border-radius:3px;
+  color:var(--ink-dim);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;
+  text-decoration:none;transition:all .15s;white-space:nowrap
+}
+.nav-pill-hdr:hover{border-color:var(--accent);color:var(--ink)}
+.hdr-nav-mobile{display:none}
+
 /* ── chart button in market table ──────────────────────── */
 .chart-btn{
   color:var(--ink-faint);font-size:14px;line-height:1;
@@ -183,4 +192,49 @@ footer .spacer{margin-left:auto}
 
 @media (max-width:800px){
   .drawer{width:100vw}
+}
+
+/* ── tablet / large phone ──────────────────────────────── */
+@media (max-width:768px){
+  .nav-pill{font-size:9px;padding:4px 8px}
+  header{flex-wrap:wrap;padding:10px 14px;gap:8px}
+  .controls{flex-wrap:wrap;gap:6px}
+  .status{width:100%;order:10;margin-left:0 !important;justify-content:flex-end}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .panel table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .market-table{max-height:55vh}
+  footer{flex-wrap:wrap;padding:10px 14px}
+  .drawer{width:100vw;right:-100vw}
+  .drawer.open{right:0}
+  .leaders-grid{grid-template-columns:1fr !important}
+}
+
+/* ── phone ─────────────────────────────────────────────── */
+@media (max-width:480px){
+  html,body{font-size:12px}
+  header{padding:8px 12px;gap:6px}
+  .brand .mark{font-size:20px}
+  .brand .sub{font-size:9px;letter-spacing:0.12em}
+  .nav-pill-hdr{display:none}
+  .hdr-nav-mobile{display:flex;gap:6px;width:100%;order:11}
+  .controls .btn{padding:5px 8px;font-size:10px;letter-spacing:0.08em}
+  .controls .mode-label{font-size:9px}
+  .kpi{padding:10px 12px}
+  .kpi .lbl{font-size:9px;letter-spacing:0.14em;margin-bottom:5px}
+  .kpi .val{font-size:20px}
+  .kpi .sub{font-size:10px;margin-top:4px}
+  .panel{padding:10px 12px}
+  .panel h2{font-size:9px;margin-bottom:10px;gap:6px}
+  .panel h2::before{width:12px}
+  #mktFilter{width:100px !important}
+  table{font-size:11px}
+  thead th{padding:4px 5px;font-size:9px}
+  tbody td{padding:5px 5px}
+  .flow-val{font-size:18px}
+  .flow-bar{height:16px}
+  footer{padding:8px 12px;gap:6px}
+  .drawer-head{flex-wrap:wrap;gap:6px;padding:10px 12px}
+  .drawer-body{padding:12px}
+  #chart{height:220px}
+  .btn-sm{padding:4px 8px}
 }

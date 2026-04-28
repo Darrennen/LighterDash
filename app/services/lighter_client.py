@@ -135,6 +135,44 @@ class LighterClient:
             return []
         return j.get("candlesticks") or j.get("candles") or j.get("data") or []
 
+    async def order_book(self, market_id: int) -> dict:
+        """Single-market order book snapshot with bid/ask depth levels."""
+        # Try direct single-market endpoint first
+        for path in ["/orderBook", "/order_book"]:
+            try:
+                j = await self._get(path, params={"market_id": market_id})
+                if j and (j.get("bid_book") or j.get("bids") or j.get("ask_book") or j.get("asks")):
+                    return j
+                # might be nested under "order_book"
+                inner = j.get("order_book") or {}
+                if inner:
+                    return inner
+            except httpx.HTTPError:
+                continue
+        # Fall back: filter from all-books endpoint
+        try:
+            books = await self.order_books()
+            for b in books:
+                if int(b.get("market_id") or 0) == market_id:
+                    return b
+        except Exception as e:
+            log.debug("order_book fallback failed: %s", e)
+        return {}
+
+
+    async def staking_pool_transfers(self, pool_index: int, limit: int = 100) -> list[dict]:
+        """Recent stake/unstake transfers for a staking pool (public endpoint)."""
+        try:
+            j = await self._get(
+                "/transfer/history",
+                params={"account_index": pool_index, "limit": limit},
+            )
+        except httpx.HTTPError as e:
+            log.debug("staking_pool_transfers(%s) failed: %s", pool_index, e)
+            return []
+        if isinstance(j, list):
+            return j
+        return j.get("transfers") or j.get("data") or j.get("history") or []
 
     _BUYBACKS_WS = "wss://lighterliquidations.store/ws"
 

@@ -678,6 +678,52 @@ function renderFunding(byExchange) {
   }
 }
 
+// ── staking pool stats ────────────────────────────────────────
+
+function renderStakingStats(data) {
+  const grid = $('#stakingStatsGrid');
+  if (!grid) return;
+
+  const h24  = data.h24  || {};
+  const h168 = data.h168 || {};
+  const raw  = data.raw_count || 0;
+
+  const netCls24  = h24.net_usd  >= 0 ? 'up' : 'down';
+  const netCls7d  = h168.net_usd >= 0 ? 'up' : 'down';
+
+  const card = (lbl, val, cls = '', sub = '') => `
+    <div style="background:var(--bg);padding:16px">
+      <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:6px">${lbl}</div>
+      <div class="${cls}" style="font-size:18px;font-variant-numeric:tabular-nums;font-weight:500">${val}</div>
+      ${sub ? `<div style="font-size:10px;color:var(--ink-dim);margin-top:3px">${sub}</div>` : ''}
+    </div>`;
+
+  grid.innerHTML = [
+    card('24h Staked',   fmtUsd(h24.stake_usd),   'up',   `${h24.stakes || 0} tx`),
+    card('24h Unstaked', fmtUsd(h24.unstake_usd),  'down', `${h24.unstakes || 0} tx`),
+    card('24h Net Flow', fmtUsd(h24.net_usd),       netCls24, `${h24.unique_accounts || 0} accounts`),
+    card('7d Staked',    fmtUsd(h168.stake_usd),   'up',   `${h168.stakes || 0} tx`),
+    card('7d Unstaked',  fmtUsd(h168.unstake_usd), 'down', `${h168.unstakes || 0} tx`),
+    card('7d Net Flow',  fmtUsd(h168.net_usd),      netCls7d, `${h168.unique_accounts || 0} accounts`),
+  ].join('');
+
+  const ageEl = $('#stakingStatsAge');
+  if (ageEl) ageEl.textContent = raw
+    ? `last ${raw} events · pool-wide`
+    : 'pool-wide';
+}
+
+async function pollStakingStats() {
+  try {
+    const data = await apiGet('/api/lit/staking-stats');
+    renderStakingStats(data);
+  } catch (e) {
+    console.warn('staking-stats fetch failed:', e.message);
+    const grid = $('#stakingStatsGrid');
+    if (grid) grid.innerHTML = `<div style="background:var(--bg);padding:14px;color:var(--ink-faint);font-size:11px;grid-column:1/-1">staking stats unavailable — pool endpoint may be rate-limited</div>`;
+  }
+}
+
 // ── staking activity ──────────────────────────────────────────
 
 function renderStakingActivity(data) {
@@ -859,17 +905,191 @@ async function triggerBackfill() {
   } catch (e) { /* ignore */ }
 }
 
+// ── order book heatmap ────────────────────────────────────────
+
+const HM_SNAPSHOTS = 100;  // ~5 min at 3s intervals
+const HM_LEVELS    = 60;   // vertical price buckets
+const HM_RANGE     = 0.06; // ±6% from mid price shown
+
+let _hmHistory = [];   // [{bids:[{price,size}], asks:[{price,size}], ts}]
+let _hmMid     = null; // last known mid price
+
+function _normBook(raw) {
+  const bids = raw.bid_book || raw.bids || [];
+  const asks = raw.ask_book || raw.asks || [];
+  const norm = arr => arr.map(l => ({
+    price: parseFloat(l.price || l.p || 0),
+    size:  parseFloat(l.base_amount || l.quantity || l.size || l.s || l.amount || 0),
+  })).filter(l => l.price > 0 && l.size > 0);
+  return { bids: norm(bids), asks: norm(asks) };
+}
+
+function _bucketize(levels, minP, maxP, n) {
+  const step = (maxP - minP) / n;
+  const out  = new Float32Array(n);
+  for (const l of levels) {
+    if (l.price <= minP || l.price >= maxP) continue;
+    const idx = Math.min(n - 1, Math.floor((l.price - minP) / step));
+    out[idx] += l.size;
+  }
+  return out;
+}
+
+function drawHeatmap() {
+  const canvas = document.getElementById('obHeatmap');
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.offsetWidth;
+  const H   = canvas.offsetHeight;
+  if (!W || !H) return;
+
+  // always reset canvas (clears + resets transform)
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const cs       = getComputedStyle(document.documentElement);
+  const bgColor  = cs.getPropertyValue('--bg').trim()       || '#0e1117';
+  const dimColor = cs.getPropertyValue('--ink-faint').trim() || '#555';
+  const lineCol  = cs.getPropertyValue('--line').trim()      || '#1e2028';
+
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, W, H);
+
+  if (!_hmHistory.length || !_hmMid) {
+    ctx.fillStyle = dimColor;
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('waiting for order book data…', W / 2, H / 2);
+    return;
+  }
+
+  const AXIS_W = 52;
+  const chartW = W - AXIS_W;
+  const mid    = _hmMid;
+  const minP   = mid * (1 - HM_RANGE);
+  const maxP   = mid * (1 + HM_RANGE);
+  const rowH   = H / HM_LEVELS;
+  const colW   = chartW / HM_SNAPSHOTS;
+
+  // Precompute buckets + find global max for log normalization
+  let gMax = 0;
+  const cols = _hmHistory.map(snap => {
+    const bidB = _bucketize(snap.bids, minP, maxP, HM_LEVELS);
+    const askB = _bucketize(snap.asks, minP, maxP, HM_LEVELS);
+    for (let i = 0; i < HM_LEVELS; i++) {
+      if (bidB[i] > gMax) gMax = bidB[i];
+      if (askB[i] > gMax) gMax = askB[i];
+    }
+    return { bidB, askB };
+  });
+
+  const logMax = gMax > 0 ? Math.log1p(gMax) : 1;
+  // oldest snapshot starts at column (HM_SNAPSHOTS - history.length)
+  const offset = HM_SNAPSHOTS - cols.length;
+
+  cols.forEach((col, i) => {
+    const x = (offset + i) * colW;
+    for (let b = 0; b < HM_LEVELS; b++) {
+      // b=0 → lowest price → bottom of canvas
+      const y = H - (b + 1) * rowH;
+      if (col.bidB[b] > 0) {
+        const a = (Math.log1p(col.bidB[b]) / logMax * 0.9).toFixed(3);
+        ctx.fillStyle = `rgba(111,224,137,${a})`;
+        ctx.fillRect(x, y, colW + 0.5, rowH + 0.5);
+      }
+      if (col.askB[b] > 0) {
+        const a = (Math.log1p(col.askB[b]) / logMax * 0.9).toFixed(3);
+        ctx.fillStyle = `rgba(255,90,90,${a})`;
+        ctx.fillRect(x, y, colW + 0.5, rowH + 0.5);
+      }
+    }
+  });
+
+  // Mid price line (dashed white)
+  const midY = H - ((mid - minP) / (maxP - minP)) * H;
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.moveTo(0, midY);
+  ctx.lineTo(chartW, midY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Price axis (right side — 5 labels)
+  ctx.fillStyle = dimColor;
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'left';
+  for (let i = 0; i <= 5; i++) {
+    const price = minP + (maxP - minP) * (i / 5);
+    const y     = H - (i / 5) * H;
+    ctx.fillStyle = lineCol;
+    ctx.fillRect(chartW, y - 0.5, AXIS_W, 1);
+    ctx.fillStyle = dimColor;
+    ctx.fillText('$' + price.toFixed(4), chartW + 4, y + 3);
+  }
+
+  // Labels
+  const hmMidEl  = document.getElementById('hmMidLabel');
+  const hmTimeEl = document.getElementById('hmTimeLabel');
+  if (hmMidEl) hmMidEl.textContent = `mid $${mid.toFixed(4)} · spread ${((maxP - minP) / mid * 100).toFixed(1)}% range`;
+  if (hmTimeEl && _hmHistory.length > 1) {
+    const ageMs = Date.now() - _hmHistory[0].ts;
+    hmTimeEl.textContent = `− ${Math.round(ageMs / 1000)}s ago`;
+  }
+}
+
+async function pollOrderbook() {
+  try {
+    const data = await apiGet('/api/lit/orderbook?market_id=120');
+    const { bids, asks } = _normBook(data);
+
+    // Mid from best bid/ask (avoid spread if data uses separate fields)
+    const bestBid = data.best_bid_price
+      ? parseFloat(data.best_bid_price)
+      : bids.length ? bids.reduce((m, l) => l.price > m ? l.price : m, 0) : null;
+    const bestAsk = data.best_ask_price
+      ? parseFloat(data.best_ask_price)
+      : asks.length ? asks.reduce((m, l) => l.price < m ? l.price : m, Infinity) : null;
+
+    if (bestBid && bestAsk && isFinite(bestAsk)) {
+      _hmMid = (bestBid + bestAsk) / 2;
+    } else if (bestBid) {
+      _hmMid = bestBid;
+    } else if (bestAsk && isFinite(bestAsk)) {
+      _hmMid = bestAsk;
+    }
+
+    if (bids.length || asks.length) {
+      _hmHistory.push({ bids, asks, ts: data.ts || Date.now() });
+      if (_hmHistory.length > HM_SNAPSHOTS) _hmHistory.shift();
+    }
+    drawHeatmap();
+  } catch (e) {
+    console.warn('orderbook fetch failed:', e.message);
+  }
+}
+
+// Redraw on resize
+window.addEventListener('resize', () => { if (_hmHistory.length) drawHeatmap(); });
+
 // ── boot ──────────────────────────────────────────────────────
 pollOnce();
 schedule();
 pollFunding();
 pollStaking();
+pollStakingStats();
 pollBuybacks();
 pollBackfillStatus();
+pollOrderbook();
 setInterval(pollFunding, 30_000);
 setInterval(pollStaking, 60_000);
+setInterval(pollStakingStats, 120_000);  // 2 min, matches cache TTL
 setInterval(pollBuybacks, 300_000);  // 5 min, matches cache TTL
 setInterval(pollBackfillStatus, 15_000);
+setInterval(pollOrderbook, 3_000);   // order book heatmap every 3s
 
 $('#refreshStakingBtn')?.addEventListener('click', () => {
   $('#stakingBody').innerHTML = '<tr><td colspan="4" class="empty">refreshing…</td></tr>';
