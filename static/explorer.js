@@ -14,6 +14,13 @@ const fmtUsd = n => {
   return sign + '$' + abs.toFixed(2);
 };
 const fmtNum = (n, dp = 4) => n == null ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+const fmtLit = n => {
+  if (n == null || isNaN(n)) return '—';
+  const abs = Math.abs(n), sign = n < 0 ? '-' : '';
+  if (abs >= 1e6) return sign + (abs / 1e6).toFixed(2) + 'M';
+  if (abs >= 1e3) return sign + (abs / 1e3).toFixed(2) + 'K';
+  return sign + abs.toLocaleString('en-US', { maximumFractionDigits: 2 });
+};
 const fmtMYT = ts => {
   const d = typeof ts === 'string' ? new Date(ts) : new Date(ts > 1e12 ? ts : ts * 1000);
   return d.toLocaleString('en-MY', {
@@ -708,12 +715,14 @@ function renderLitFlow(data) {
         <div>
           <div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);margin-bottom:3px">Buy</div>
           <div style="font-size:16px;font-weight:600;color:var(--green);font-variant-numeric:tabular-nums">${fmtUsd(buy)}</div>
+          ${d.buy_size ? `<div style="font-size:11px;color:var(--green);opacity:0.75;font-variant-numeric:tabular-nums;margin-top:1px">${fmtLit(d.buy_size)} LIT</div>` : ''}
           <div style="font-size:10px;color:var(--ink-faint);margin-top:2px">${buyT} trade${buyT !== 1 ? 's' : ''}</div>
           ${d.buy_avg_price != null ? `<div style="font-size:10px;color:var(--ink-dim);margin-top:3px">avg $${Number(d.buy_avg_price).toFixed(4)}</div>` : ''}
         </div>
         <div>
           <div style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--red);margin-bottom:3px">Sell</div>
           <div style="font-size:16px;font-weight:600;color:var(--red);font-variant-numeric:tabular-nums">${fmtUsd(sell)}</div>
+          ${d.sell_size ? `<div style="font-size:11px;color:var(--red);opacity:0.75;font-variant-numeric:tabular-nums;margin-top:1px">${fmtLit(d.sell_size)} LIT</div>` : ''}
           <div style="font-size:10px;color:var(--ink-faint);margin-top:2px">${sellT} trade${sellT !== 1 ? 's' : ''}</div>
           ${d.sell_avg_price != null ? `<div style="font-size:10px;color:var(--ink-dim);margin-top:3px">avg $${Number(d.sell_avg_price).toFixed(4)}</div>` : ''}
         </div>
@@ -726,7 +735,10 @@ function renderLitFlow(data) {
       </div>
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <span style="font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-faint)">Net</span>
-        <span style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;${netCls}">${net >= 0 ? '+' : ''}${fmtUsd(net)}</span>
+        <div style="text-align:right">
+          <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;${netCls}">${net >= 0 ? '+' : ''}${fmtUsd(net)}</div>
+          ${d.net_size != null ? `<div style="font-size:10px;font-variant-numeric:tabular-nums;${netCls};opacity:0.75">${d.net_size >= 0 ? '+' : ''}${fmtLit(d.net_size)} LIT</div>` : ''}
+        </div>
       </div>`}
     </div>`;
   }).join('');

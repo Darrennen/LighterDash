@@ -229,12 +229,15 @@ async def account_flow_live(
         sell_size = sum(t["size"] for t in sells)
         result[label] = {
             "buy_usd":       buy_usd,
+            "buy_size":      buy_size,
             "buy_trades":    len(buys),
             "buy_avg_price": buy_usd  / buy_size  if buy_size  > 0 else None,
             "sell_usd":      sell_usd,
+            "sell_size":     sell_size,
             "sell_trades":   len(sells),
             "sell_avg_price":sell_usd / sell_size if sell_size > 0 else None,
             "net_usd":       buy_usd - sell_usd,
+            "net_size":      buy_size - sell_size,
         }
     return result
 
