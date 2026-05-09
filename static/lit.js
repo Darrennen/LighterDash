@@ -967,11 +967,19 @@ function renderTrackedShell() {
       <td class="num tw-net7d" id="tw-net7d-${w.account_id}" style="color:var(--ink-faint)">…</td>
       <td class="num tw-net30d" id="tw-net30d-${w.account_id}" style="color:var(--ink-faint)">…</td>
       <td style="text-align:right">
-        <button onclick="twRemoveAndRefresh(${w.account_id})"
+        <button data-remove="${w.account_id}"
           style="background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="Remove">×</button>
       </td>
     </tr>`;
   }).join('');
+
+  // remove button — event delegation (module scope, no inline onclick)
+  tbody.addEventListener('click', e => {
+    const btn = e.target.closest('[data-remove]');
+    if (!btn) return;
+    twRemove(Number(btn.dataset.remove));
+    renderTrackedShell();
+  }, { once: true });
 
   // label click → inline edit
   tbody.querySelectorAll('.tw-label').forEach(el => {
@@ -998,10 +1006,6 @@ function renderTrackedShell() {
   });
 }
 
-function twRemoveAndRefresh(id) {
-  twRemove(id);
-  renderTrackedShell();
-}
 
 async function refreshTrackedRow(w) {
   const params = new URLSearchParams({ account_id: w.account_id });

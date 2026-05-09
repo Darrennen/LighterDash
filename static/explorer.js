@@ -345,13 +345,27 @@ function renderAccount(data, priceMap = {}) {
   const stakingBadge = staking.is_staking
     ? `<span style="margin-left:10px;padding:2px 8px;border:1px solid var(--accent);border-radius:2px;font-size:10px;letter-spacing:.1em;color:var(--accent)">LIT STAKING</span>`
     : '';
-  // track button
-  const isTracked = twExplorerGet().some(w => w.account_id === idx);
-  const trackBtn = `<button id="explorerTrackBtn" onclick="twExplorerToggle(${idx})"
-    style="margin-left:12px;padding:3px 12px;font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border-radius:3px;border:1px solid ${isTracked ? 'var(--accent)' : 'var(--line-2)'};background:${isTracked ? 'rgba(242,193,78,0.12)' : 'transparent'};color:${isTracked ? 'var(--accent)' : 'var(--ink-dim)'};transition:all .15s">
-    ${isTracked ? '★ Tracked' : '☆ Track'}
-  </button>`;
-  $('#acctStatus').innerHTML = `<span style="color:${statusColor};font-size:12px">${statusLabel}</span>${stakingBadge}${trackBtn}`;
+  $('#acctStatus').innerHTML = `<span style="color:${statusColor};font-size:12px">${statusLabel}</span>${stakingBadge}`;
+  // track button — attach listener directly (module scope, can't use inline onclick)
+  const trackBtn = document.createElement('button');
+  trackBtn.id = 'explorerTrackBtn';
+  Object.assign(trackBtn.style, {
+    marginLeft: '12px', padding: '3px 12px', fontFamily: 'var(--font-mono)',
+    fontSize: '10px', letterSpacing: '.1em', textTransform: 'uppercase',
+    cursor: 'pointer', borderRadius: '3px', transition: 'all .15s',
+  });
+  const applyTrackState = tracked => {
+    trackBtn.textContent = tracked ? '★ Tracked' : '☆ Track';
+    trackBtn.style.border = `1px solid ${tracked ? 'var(--accent)' : 'var(--line-2)'}`;
+    trackBtn.style.background = tracked ? 'rgba(242,193,78,0.12)' : 'transparent';
+    trackBtn.style.color = tracked ? 'var(--accent)' : 'var(--ink-dim)';
+  };
+  applyTrackState(twExplorerGet().some(w => w.account_id === idx));
+  trackBtn.addEventListener('click', () => {
+    twExplorerToggle(idx);
+    applyTrackState(twExplorerGet().some(w => w.account_id === idx));
+  });
+  $('#acctStatus').appendChild(trackBtn);
 
   renderPortfolioSummary(data, priceMap);
 
