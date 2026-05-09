@@ -5,6 +5,31 @@
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 
+// ── tracked wallets (shared localStorage key with lit.js) ─────
+const TW_KEY = 'lit_tracked_v1';
+function twExplorerGet() {
+  try { return JSON.parse(localStorage.getItem(TW_KEY) || '[]'); } catch { return []; }
+}
+function twExplorerToggle(account_id) {
+  const list = twExplorerGet();
+  const idx  = list.findIndex(w => w.account_id === account_id);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    list.push({ account_id, label: '', added_at: Date.now() });
+  }
+  localStorage.setItem(TW_KEY, JSON.stringify(list));
+  // re-render button
+  const isNow = list.some(w => w.account_id === account_id);
+  const btn = document.getElementById('explorerTrackBtn');
+  if (btn) {
+    btn.textContent = isNow ? '★ Tracked' : '☆ Track';
+    btn.style.border = `1px solid ${isNow ? 'var(--accent)' : 'var(--line-2)'}`;
+    btn.style.background = isNow ? 'rgba(242,193,78,0.12)' : 'transparent';
+    btn.style.color = isNow ? 'var(--accent)' : 'var(--ink-dim)';
+  }
+}
+
 const fmtUsd = n => {
   if (n == null || isNaN(n)) return '—';
   const abs = Math.abs(n), sign = n < 0 ? '-' : '';
@@ -320,7 +345,13 @@ function renderAccount(data, priceMap = {}) {
   const stakingBadge = staking.is_staking
     ? `<span style="margin-left:10px;padding:2px 8px;border:1px solid var(--accent);border-radius:2px;font-size:10px;letter-spacing:.1em;color:var(--accent)">LIT STAKING</span>`
     : '';
-  $('#acctStatus').innerHTML = `<span style="color:${statusColor};font-size:12px">${statusLabel}</span>${stakingBadge}`;
+  // track button
+  const isTracked = twExplorerGet().some(w => w.account_id === idx);
+  const trackBtn = `<button id="explorerTrackBtn" onclick="twExplorerToggle(${idx})"
+    style="margin-left:12px;padding:3px 12px;font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border-radius:3px;border:1px solid ${isTracked ? 'var(--accent)' : 'var(--line-2)'};background:${isTracked ? 'rgba(242,193,78,0.12)' : 'transparent'};color:${isTracked ? 'var(--accent)' : 'var(--ink-dim)'};transition:all .15s">
+    ${isTracked ? '★ Tracked' : '☆ Track'}
+  </button>`;
+  $('#acctStatus').innerHTML = `<span style="color:${statusColor};font-size:12px">${statusLabel}</span>${stakingBadge}${trackBtn}`;
 
   renderPortfolioSummary(data, priceMap);
 

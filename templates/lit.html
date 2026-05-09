@@ -101,6 +101,34 @@
   </div>
 </section>
 
+<!-- Tracked Wallets -->
+<div style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div style="padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0;font-size:13px">Tracked Wallets <span class="count" id="trackedCount"></span></h2>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+      <input id="trackAddInput" type="text" placeholder="Account # to track"
+        style="font-family:var(--font-mono);font-size:11px;padding:5px 10px;background:var(--bg);border:1px solid var(--line-2);border-radius:3px;color:var(--ink);width:160px;outline:none" />
+      <button id="trackAddBtn" class="btn" style="font-size:10px;padding:4px 12px">+ Add</button>
+    </div>
+  </div>
+  <div id="trackedEmpty" style="padding:10px 20px 14px;font-size:11px;color:var(--ink-faint)">No tracked wallets — add an account number above.</div>
+  <table id="trackedTable" style="display:none;margin:0">
+    <thead>
+      <tr>
+        <th>Account</th>
+        <th>Label</th>
+        <th class="num">24h Buy</th>
+        <th class="num">24h Sell</th>
+        <th class="num">24h Net</th>
+        <th class="num">7d Net</th>
+        <th class="num">30d Net</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="trackedBody"></tbody>
+  </table>
+</div>
+
 <section class="grid">
   <!-- live trades -->
   <div class="panel">

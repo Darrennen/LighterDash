@@ -905,6 +905,173 @@ async function triggerBackfill() {
   } catch (e) { /* ignore */ }
 }
 
+// ── tracked wallets ───────────────────────────────────────────
+
+const TW_KEY = 'lit_tracked_v1';
+
+function twGet() {
+  try { return JSON.parse(localStorage.getItem(TW_KEY) || '[]'); } catch { return []; }
+}
+function twSet(list) { localStorage.setItem(TW_KEY, JSON.stringify(list)); }
+
+function twAdd(account_id) {
+  const list = twGet();
+  if (list.find(w => w.account_id === account_id)) return false;
+  list.push({ account_id, label: '', added_at: Date.now() });
+  twSet(list);
+  return true;
+}
+function twRemove(account_id) {
+  twSet(twGet().filter(w => w.account_id !== account_id));
+}
+function twSetLabel(account_id, label) {
+  const list = twGet();
+  const w = list.find(w => w.account_id === account_id);
+  if (w) { w.label = label; twSet(list); }
+}
+function twSetAddress(account_id, address) {
+  const list = twGet();
+  const w = list.find(w => w.account_id === account_id);
+  if (w && address) { w.address = address; twSet(list); }
+}
+
+function renderTrackedShell() {
+  const list = twGet();
+  const empty = document.getElementById('trackedEmpty');
+  const table = document.getElementById('trackedTable');
+  const countEl = document.getElementById('trackedCount');
+  if (!list.length) {
+    empty.style.display = '';
+    table.style.display = 'none';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  empty.style.display = 'none';
+  table.style.display = '';
+  if (countEl) countEl.textContent = list.length + ' accounts';
+
+  const tbody = document.getElementById('trackedBody');
+  tbody.innerHTML = list.map(w => {
+    const lbl = w.label
+      ? `<span class="tw-label" data-id="${w.account_id}">${w.label}</span>`
+      : `<span class="tw-label" data-id="${w.account_id}" style="color:var(--ink-faint)">click to label</span>`;
+    return `<tr id="tw-row-${w.account_id}">
+      <td>
+        <a href="/explorer?q=${w.account_id}" target="_blank"
+           style="color:var(--accent);text-decoration:none;font-weight:600">#${w.account_id}</a>
+      </td>
+      <td>${lbl}</td>
+      <td class="num tw-buy24" id="tw-buy24-${w.account_id}" style="color:var(--ink-faint)">…</td>
+      <td class="num tw-sell24" id="tw-sell24-${w.account_id}" style="color:var(--ink-faint)">…</td>
+      <td class="num tw-net24" id="tw-net24-${w.account_id}" style="color:var(--ink-faint)">…</td>
+      <td class="num tw-net7d" id="tw-net7d-${w.account_id}" style="color:var(--ink-faint)">…</td>
+      <td class="num tw-net30d" id="tw-net30d-${w.account_id}" style="color:var(--ink-faint)">…</td>
+      <td style="text-align:right">
+        <button onclick="twRemoveAndRefresh(${w.account_id})"
+          style="background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="Remove">×</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  // label click → inline edit
+  tbody.querySelectorAll('.tw-label').forEach(el => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => {
+      const id = Number(el.dataset.id);
+      const cur = twGet().find(w => w.account_id === id)?.label || '';
+      const input = document.createElement('input');
+      Object.assign(input.style, {
+        fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '2px 6px',
+        background: 'var(--bg)', border: '1px solid var(--accent)',
+        borderRadius: '2px', color: 'var(--ink)', outline: 'none', width: '120px',
+      });
+      input.value = cur;
+      el.replaceWith(input);
+      input.focus();
+      const save = () => {
+        twSetLabel(id, input.value.trim());
+        renderTrackedShell();
+      };
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+    });
+  });
+}
+
+function twRemoveAndRefresh(id) {
+  twRemove(id);
+  renderTrackedShell();
+}
+
+async function refreshTrackedRow(w) {
+  const params = new URLSearchParams({ account_id: w.account_id });
+  if (w.address) params.set('address', w.address);
+  try {
+    const data = await apiGet(`/api/lit/account-flow-live?${params}`);
+    // cache address for future calls
+    if (!w.address) {
+      const list = twGet();
+      const entry = list.find(e => e.account_id === w.account_id);
+      // address comes back indirectly — look it up once
+    }
+    const fmt = (val, cls) => {
+      const el = document.getElementById(val);
+      if (!el) return;
+      el.style.color = '';
+      el.textContent = cls;
+    };
+    const d24 = data['24h'] || {};
+    const d7d = data['7d']  || {};
+    const d30d = data['30d'] || {};
+
+    const set = (id, text, color) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = text;
+      el.style.color = color || '';
+    };
+
+    set(`tw-buy24-${w.account_id}`,  fmtUsd(d24.buy_usd  || 0), 'var(--green)');
+    set(`tw-sell24-${w.account_id}`, fmtUsd(d24.sell_usd || 0), 'var(--red)');
+
+    const net24  = d24.net_usd  || 0;
+    const net7d  = d7d.net_usd  || 0;
+    const net30d = d30d.net_usd || 0;
+    set(`tw-net24-${w.account_id}`,  (net24  >= 0 ? '+' : '') + fmtUsd(net24),  net24  >= 0 ? 'var(--green)' : 'var(--red)');
+    set(`tw-net7d-${w.account_id}`,  (net7d  >= 0 ? '+' : '') + fmtUsd(net7d),  net7d  >= 0 ? 'var(--green)' : 'var(--red)');
+    set(`tw-net30d-${w.account_id}`, (net30d >= 0 ? '+' : '') + fmtUsd(net30d), net30d >= 0 ? 'var(--green)' : 'var(--red)');
+  } catch (e) {
+    const errText = 'error';
+    ['tw-buy24','tw-sell24','tw-net24','tw-net7d','tw-net30d'].forEach(pfx => {
+      const el = document.getElementById(`${pfx}-${w.account_id}`);
+      if (el) { el.textContent = errText; el.style.color = 'var(--ink-faint)'; }
+    });
+  }
+}
+
+async function refreshTracked() {
+  const list = twGet();
+  if (!list.length) return;
+  renderTrackedShell();
+  // fetch all in parallel — each row updates independently
+  await Promise.allSettled(list.map(w => refreshTrackedRow(w)));
+}
+
+// Add button
+document.getElementById('trackAddBtn').addEventListener('click', () => {
+  const input = document.getElementById('trackAddInput');
+  const val = parseInt(input.value.trim(), 10);
+  if (!val || val < 1) return;
+  if (twAdd(val)) {
+    input.value = '';
+    renderTrackedShell();
+    refreshTrackedRow(twGet().find(w => w.account_id === val));
+  }
+});
+document.getElementById('trackAddInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('trackAddBtn').click();
+});
+
 // ── order book heatmap ────────────────────────────────────────
 
 const HM_SNAPSHOTS = 100;  // ~5 min at 3s intervals
@@ -1084,12 +1251,14 @@ pollStakingStats();
 pollBuybacks();
 pollBackfillStatus();
 pollOrderbook();
+refreshTracked();
 setInterval(pollFunding, 30_000);
 setInterval(pollStaking, 60_000);
 setInterval(pollStakingStats, 120_000);  // 2 min, matches cache TTL
 setInterval(pollBuybacks, 300_000);  // 5 min, matches cache TTL
 setInterval(pollBackfillStatus, 15_000);
-setInterval(pollOrderbook, 3_000);   // order book heatmap every 3s
+setInterval(pollOrderbook, 3_000);
+setInterval(refreshTracked, 120_000); // tracked wallets refresh every 2 min
 
 $('#refreshStakingBtn')?.addEventListener('click', () => {
   $('#stakingBody').innerHTML = '<tr><td colspan="4" class="empty">refreshing…</td></tr>';
