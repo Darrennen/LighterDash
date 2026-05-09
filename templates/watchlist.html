@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Watchlist · Lighter Cockpit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+<style>
+  .nav-pill{padding:4px 12px;border:1px solid var(--line-2);border-radius:3px;color:var(--ink-dim);font-size:10px;letter-spacing:.14em;text-transform:uppercase;text-decoration:none;transition:all .15s}
+  .nav-pill:hover{border-color:var(--accent);color:var(--ink)}
+
+  /* aggregate summary bar */
+  .agg-bar{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:1px}
+  .agg-cell{background:var(--panel);padding:14px 18px}
+  .agg-lbl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:4px}
+  .agg-val{font-size:20px;font-variant-numeric:tabular-nums;font-weight:600}
+
+  /* cards grid */
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1px;background:var(--line)}
+
+  .card{background:var(--panel);padding:20px;position:relative;display:flex;flex-direction:column;gap:14px}
+  .card-header{display:flex;align-items:flex-start;gap:10px}
+  .card-id{font-size:18px;font-weight:700;color:var(--ink)}
+  .card-label{font-size:11px;color:var(--ink-faint);margin-top:2px;cursor:pointer}
+  .card-label:hover{color:var(--ink)}
+  .card-addr{font-size:10px;color:var(--ink-faint);word-break:break-all;margin-top:2px}
+  .card-actions{margin-left:auto;display:flex;gap:6px;align-items:center;flex-shrink:0}
+
+  .flow-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .flow-side-lbl{font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
+  .flow-val-lg{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+  .flow-lit{font-size:11px;font-variant-numeric:tabular-nums;opacity:.75;margin-top:1px}
+  .flow-sub{font-size:10px;color:var(--ink-faint);margin-top:2px}
+
+  .bar-track{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin:4px 0}
+  .bar-fill{height:100%;border-radius:2px;background:var(--green)}
+
+  .net-row{display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--line)}
+  .net-lbl{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+  .net-val{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+  .net-lit{font-size:10px;font-variant-numeric:tabular-nums;opacity:.8;text-align:right}
+
+  .card-loading{display:flex;flex-direction:column;gap:8px}
+  .skeleton{background:var(--line);border-radius:2px;animation:pulse 1.4s ease-in-out infinite}
+  .skeleton-lg{height:22px;width:70%}
+  .skeleton-sm{height:12px;width:50%}
+  @keyframes pulse{0%,100%{opacity:.4}50%{opacity:.9}}
+
+  .empty-state{text-align:center;padding:80px 20px;color:var(--ink-faint);font-size:13px;background:var(--panel)}
+
+  .pill-buy{display:inline-block;padding:1px 6px;background:rgba(111,224,137,.15);color:var(--green);border-radius:2px;font-size:9px;letter-spacing:.08em}
+  .pill-sell{display:inline-block;padding:1px 6px;background:rgba(255,90,90,.15);color:var(--red);border-radius:2px;font-size:9px;letter-spacing:.08em}
+
+  #addWrap{display:flex;gap:6px;align-items:center}
+  #addInput{font-family:var(--font-mono);font-size:11px;padding:6px 12px;background:var(--bg);border:1px solid var(--line-2);border-radius:3px;color:var(--ink);outline:none;width:180px;transition:border-color .15s}
+  #addInput:focus{border-color:var(--accent)}
+  #addInput::placeholder{color:var(--ink-faint)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <a href="/" class="mark" style="text-decoration:none">lighter</a>
+    <span class="sub">Watchlist</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span style="font-size:10px;color:var(--ink-faint);letter-spacing:.1em;text-transform:uppercase">PERIOD</span>
+    <button class="btn active" data-period="24h">24h</button>
+    <button class="btn" data-period="7d">7d</button>
+    <button class="btn" data-period="30d">30d</button>
+  </div>
+  <div id="addWrap" style="margin-left:auto">
+    <input id="addInput" type="text" placeholder="Add account #" autocomplete="off" />
+    <button id="addBtn" class="btn" style="font-size:10px;padding:5px 12px">+ Add</button>
+  </div>
+  <div style="display:flex;gap:8px">
+    <a href="/lit" class="nav-pill">LIT tracker</a>
+    <a href="/explorer" class="nav-pill">explorer</a>
+    <a href="/" class="nav-pill">← overview</a>
+  </div>
+</header>
+
+<!-- aggregate bar -->
+<div id="aggBar" class="agg-bar" style="display:none">
+  <div class="agg-cell"><div class="agg-lbl">Accounts</div><div class="agg-val" id="aggCount">—</div></div>
+  <div class="agg-cell"><div class="agg-lbl">Total Buy</div><div class="agg-val up" id="aggBuy">—</div></div>
+  <div class="agg-cell"><div class="agg-lbl">Total Sell</div><div class="agg-val down" id="aggSell">—</div></div>
+  <div class="agg-cell"><div class="agg-lbl">Net Flow</div><div class="agg-val" id="aggNet">—</div></div>
+  <div class="agg-cell"><div class="agg-lbl">Net LIT</div><div class="agg-val" id="aggNetLit">—</div></div>
+  <div class="agg-cell"><div class="agg-lbl">Last Refresh</div><div class="agg-val" id="aggTs" style="font-size:13px">—</div></div>
+</div>
+
+<!-- cards -->
+<div id="emptyState" class="empty-state">
+  <div style="font-size:28px;margin-bottom:12px">☆</div>
+  <div style="margin-bottom:8px">No tracked wallets yet.</div>
+  <div style="font-size:11px">Type an account number above and press Enter, or use the <strong>Track</strong> button on the Explorer page.</div>
+</div>
+
+<div id="cardsGrid" class="cards" style="border:1px solid var(--line)"></div>
+
+<footer>
+  <span id="statusMsg" style="color:var(--ink-faint)">—</span>
+  <div class="spacer"></div>
+  <span>data via mainnet.zklighter.elliot.ai public API</span>
+</footer>
+
+<script type="module" src="/static/watchlist.js"></script>
+</body>
+</html>

@@ -62,6 +62,11 @@ async def explorer_page():
     return FileResponse(ROOT / "templates" / "explorer.html")
 
 
+@app.get("/watchlist", include_in_schema=False)
+async def watchlist_page():
+    return FileResponse(ROOT / "templates" / "watchlist.html")
+
+
 @app.get("/health", tags=["meta"])
 async def health():
     return {"status": "ok"}
