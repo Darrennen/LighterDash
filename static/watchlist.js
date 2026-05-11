@@ -9,7 +9,7 @@ let _litPrice = null;
 
 // ── localStorage helpers ──────────────────────────────────────
 function twGet()      { try { return JSON.parse(localStorage.getItem(TW_KEY) || '[]'); } catch { return []; } }
-function twSet(list)  { localStorage.setItem(TW_KEY, JSON.stringify(list)); }
+function twSet(list)  { try { localStorage.setItem(TW_KEY, JSON.stringify(list)); } catch { /* storage unavailable */ } }
 function twAdd(id)    { const l = twGet(); if (!l.find(w => w.account_id===id)) { l.push({account_id:id,label:'',added_at:Date.now()}); twSet(l); return true; } return false; }
 function twRemove(id) { twSet(twGet().filter(w => w.account_id !== id)); }
 function twSetLabel(id, label) { const l = twGet(); const w = l.find(w=>w.account_id===id); if(w){w.label=label;twSet(l);} }
@@ -245,18 +245,26 @@ document.querySelectorAll('[data-period]').forEach(b => {
 });
 
 // ── add account ───────────────────────────────────────────────
-document.getElementById('addBtn').addEventListener('click', () => {
+function doAdd() {
   const inp = document.getElementById('addInput');
-  const val = parseInt(inp.value.trim(), 10);
-  if (!val || val < 1) return;
-  if (twAdd(val)) {
-    inp.value = '';
-    render();
-    fetchOne(twGet().find(w => w.account_id === val));
+  const raw = inp.value.trim();
+  const val = parseInt(raw, 10);
+  if (!raw) { inp.placeholder = 'enter an account number'; inp.style.borderColor = 'var(--red)'; setTimeout(() => { inp.style.borderColor = ''; inp.placeholder = 'Add account #'; }, 1500); return; }
+  if (!val || val < 1 || isNaN(val)) { inp.style.borderColor = 'var(--red)'; inp.style.outline = 'none'; setTimeout(() => { inp.style.borderColor = ''; }, 1500); return; }
+  const added = twAdd(val);
+  if (!added) {
+    inp.style.borderColor = 'var(--amber)';
+    setTimeout(() => { inp.style.borderColor = ''; }, 1500);
+    return;
   }
-});
+  inp.value = '';
+  render();
+  const w = twGet().find(x => x.account_id === val);
+  if (w) fetchOne(w);
+}
+document.getElementById('addBtn').addEventListener('click', doAdd);
 document.getElementById('addInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('addBtn').click();
+  if (e.key === 'Enter') doAdd();
 });
 
 // ── boot ─────────────────────────────────────────────────────
