@@ -5,6 +5,7 @@
 const TW_KEY = 'lit_tracked_v1';
 let _period  = '24h';
 let _data    = {};   // account_id → full API response (all periods)
+let _litPrice = null;
 
 // ── localStorage helpers ──────────────────────────────────────
 function twGet()      { try { return JSON.parse(localStorage.getItem(TW_KEY) || '[]'); } catch { return []; } }
@@ -125,6 +126,24 @@ function cardHTML(w) {
     ? `<span id="wl-lbl-${w.account_id}" class="card-label">${w.label}</span>`
     : `<span id="wl-lbl-${w.account_id}" class="card-label" style="color:var(--ink-faint);font-style:italic">click to label</span>`;
 
+  // PnL section
+  const avgBuy = d?.buy_avg_price;
+  let pnlHtml = '';
+  if (!loading && !noData && avgBuy && _litPrice && avgBuy > 0) {
+    const pnlPct = (_litPrice - avgBuy) / avgBuy * 100;
+    const pnlCls = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+    const bSize = d?.buy_size || 0;
+    const pnlUsd = bSize * (_litPrice - avgBuy);
+    pnlHtml = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)">Unrealized PnL</div>
+      <div style="text-align:right">
+        <div style="font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;color:${pnlCls}">${pnlPct>=0?'+':''}${pnlPct.toFixed(2)}%</div>
+        <div style="font-size:10px;color:${pnlCls};opacity:.8">${pnlUsd>=0?'+':''}${fmtUsd(pnlUsd)} on ${fmtLit(bSize)} LIT</div>
+        <div style="font-size:9px;color:var(--ink-faint);margin-top:1px">avg $${avgBuy.toFixed(4)} → now $${_litPrice.toFixed(4)}</div>
+      </div>
+    </div>`;
+  }
+
   const inner = loading
     ? `<div class="card-loading">
          <div class="skeleton skeleton-lg"></div>
@@ -161,7 +180,8 @@ function cardHTML(w) {
           <div class="net-val" style="color:${netCls}">${fmtSign(net)}${fmtUsd(net)}</div>
           ${nSize != null ? `<div class="net-lit" style="color:${litCls}">${fmtSign(nSize)}${fmtLit(nSize)} LIT</div>` : ''}
         </div>
-      </div>`;
+      </div>
+      ${pnlHtml}`;
 
   return `<div class="card">
     <div class="card-header">
@@ -204,6 +224,11 @@ async function refreshAll() {
   if (!list.length) { render(); return; }
   document.getElementById('statusMsg').textContent = `Fetching ${list.length} account${list.length!==1?'s':''}…`;
   render(); // show skeletons first
+  // fetch current LIT price in parallel with accounts
+  const priceRes = await fetch('/api/lit/summary').then(r => r.json()).catch(() => null);
+  if (priceRes) {
+    _litPrice = parseFloat(priceRes?.spot?.last_price || priceRes?.perp?.last_price || 0) || null;
+  }
   await Promise.allSettled(list.map(fetchOne));
   document.getElementById('statusMsg').textContent =
     `Updated ${new Date().toLocaleTimeString('en-GB',{hour12:false})} · ${list.length} accounts`;

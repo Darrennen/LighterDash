@@ -59,6 +59,10 @@ _ob_cache: dict | None = None
 _ob_cache_ts: float = 0.0
 _OB_TTL = 2.0  # 2-second cache — callers poll every 3s
 
+_candles_cache: dict = {}
+_candles_cache_ts: dict = {}
+_CANDLES_TTL = 60.0
+
 # market_id sentinel: None = all LIT markets, 120 = perp, 2049 = spot
 _VALID_MARKETS = {120, 2049}
 
@@ -459,6 +463,28 @@ async def orderbook(market_id: int = Query(120)):
     _ob_cache = {"market_id": market_id, "ts": int(now * 1000), **data}
     _ob_cache_ts = now
     return _ob_cache
+
+
+@router.get("/candles")
+async def candles(
+    resolution: str = Query("1h", pattern="^(5m|15m|1h|4h|1d)$"),
+    count: int = Query(72, ge=10, le=200),
+    market_id: int = Query(120),
+):
+    """OHLCV candles for LIT markets."""
+    cache_key = f"{market_id}_{resolution}"
+    now = time.time()
+    if cache_key in _candles_cache and now - _candles_cache_ts.get(cache_key, 0) < _CANDLES_TTL:
+        return _candles_cache[cache_key]
+    try:
+        raw = await client.candles(market_id=market_id, resolution=resolution, count=count)
+    except Exception as e:
+        log.warning("candles fetch failed: %s", e)
+        raw = []
+    result = {"candles": raw, "market_id": market_id, "resolution": resolution, "ts": int(now * 1000)}
+    _candles_cache[cache_key] = result
+    _candles_cache_ts[cache_key] = now
+    return result
 
 
 @router.get("/leaders")

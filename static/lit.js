@@ -1076,6 +1076,130 @@ document.getElementById('trackAddInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('trackAddBtn').click();
 });
 
+// ── LIT price chart ───────────────────────────────────────────
+
+let _chartRes = '1h';
+let _chartData = [];
+
+function _normCandle(c) {
+  // handle multiple field name styles from Lighter API
+  const ts = c.open_time || c.time || c.t || c.timestamp || 0;
+  const o  = parseFloat(c.open   || c.o || 0);
+  const h  = parseFloat(c.high   || c.h || 0);
+  const l  = parseFloat(c.low    || c.l || 0);
+  const cl = parseFloat(c.close  || c.c || 0);
+  const v  = parseFloat(c.base_volume || c.quote_volume || c.volume || c.v || 0);
+  return { ts: Number(ts), o, h, l, c: cl, v };
+}
+
+function drawCandleChart(candles) {
+  const el = document.getElementById('litPriceChart');
+  const volEl = document.getElementById('litVolumeChart');
+  const axisEl = document.getElementById('chartAxisLabel');
+  if (!el) return;
+
+  if (!candles || candles.length < 2) {
+    el.innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:12px 0">not enough candle data yet</div>';
+    return;
+  }
+
+  const norm = candles.map(_normCandle).filter(c => c.o > 0).sort((a, b) => a.ts - b.ts);
+  if (norm.length < 2) {
+    el.innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:12px 0">waiting for price data…</div>';
+    return;
+  }
+
+  const W = 800, H = 200, VH = 40;
+  const pad = { l: 4, r: 52, t: 8, b: 4 };
+  const chartW = W - pad.l - pad.r;
+  const chartH = H - pad.t - pad.b;
+
+  const prices = norm.flatMap(c => [c.h, c.l]).filter(p => p > 0);
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  const rangeP = maxP - minP || minP * 0.01;
+  const py = p => pad.t + ((maxP - p) / rangeP * chartH);
+
+  const n = norm.length;
+  const colW = chartW / n;
+  const bodyW = Math.max(1, colW * 0.6);
+
+  const candleSvg = norm.map((c, i) => {
+    const x = pad.l + i * colW + colW / 2;
+    const isBull = c.c >= c.o;
+    const col = isBull ? 'var(--green)' : 'var(--red)';
+    const bodyTop = py(Math.max(c.o, c.c));
+    const bodyBot = py(Math.min(c.o, c.c));
+    const bodyH = Math.max(1, bodyBot - bodyTop);
+    const wickTop = py(c.h);
+    const wickBot = py(c.l);
+    return `
+      <line x1="${x}" y1="${wickTop}" x2="${x}" y2="${wickBot}" stroke="${col}" stroke-width="1" opacity="0.7"/>
+      <rect x="${(x - bodyW/2).toFixed(1)}" y="${bodyTop.toFixed(1)}" width="${bodyW.toFixed(1)}" height="${bodyH.toFixed(1)}"
+        fill="${col}" opacity="0.85" rx="0.5"/>`;
+  }).join('');
+
+  // price axis labels (5 levels)
+  const axisLines = [0,1,2,3,4].map(i => {
+    const price = minP + rangeP * (i / 4);
+    const y = py(price);
+    return `<line x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1"/>
+      <text x="${W - pad.r + 4}" y="${(y + 3).toFixed(1)}" fill="var(--ink-faint)" font-size="9" font-family="monospace">$${price.toFixed(4)}</text>`;
+  }).join('');
+
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block;overflow:visible">
+    ${axisLines}${candleSvg}
+  </svg>`;
+
+  // volume bars
+  const maxV = Math.max(...norm.map(c => c.v)) || 1;
+  const volBars = norm.map((c, i) => {
+    const x = pad.l + i * colW;
+    const bh = (c.v / maxV * VH).toFixed(1);
+    const col = c.c >= c.o ? 'rgba(111,224,137,0.5)' : 'rgba(255,106,119,0.5)';
+    return `<rect x="${x.toFixed(1)}" y="${(VH - bh).toFixed(1)}" width="${(colW - 0.5).toFixed(1)}" height="${bh}" fill="${col}"/>`;
+  }).join('');
+  volEl.innerHTML = `<svg viewBox="0 0 ${W} ${VH}" preserveAspectRatio="none" style="width:100%;height:${VH}px;display:block">${volBars}</svg>`;
+
+  // axis labels
+  const first = norm[0], last = norm[norm.length - 1];
+  const fmtLabel = ts => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false
+  });
+  if (axisEl) axisEl.innerHTML = `<span>${fmtLabel(first.ts)}</span><span>${fmtLabel(last.ts)}</span>`;
+
+  // price label
+  const lastC = norm[norm.length - 1];
+  const prevC = norm[norm.length - 2];
+  const chg = ((lastC.c - prevC.c) / prevC.c * 100);
+  const priceLabel = document.getElementById('chartPriceLabel');
+  if (priceLabel) {
+    priceLabel.innerHTML = `$${lastC.c.toFixed(4)} <span style="color:${chg>=0?'var(--green)':'var(--red)'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
+  }
+}
+
+async function pollCandles() {
+  try {
+    const data = await apiGet(`/api/lit/candles?resolution=${_chartRes}&market_id=120`);
+    _chartData = data.candles || [];
+    drawCandleChart(_chartData);
+  } catch(e) {
+    console.warn('candles fetch failed:', e.message);
+  }
+}
+
+// resolution buttons
+document.querySelectorAll('[data-res]').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('[data-res]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    _chartRes = b.dataset.res;
+    _chartData = [];
+    document.getElementById('litPriceChart').innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:12px 0">loading…</div>';
+    pollCandles();
+  });
+});
+
 // ── order book heatmap ────────────────────────────────────────
 
 const HM_SNAPSHOTS = 100;  // ~5 min at 3s intervals
@@ -1255,7 +1379,9 @@ pollStakingStats();
 pollBuybacks();
 pollBackfillStatus();
 pollOrderbook();
+pollCandles();
 refreshTracked();
+setInterval(pollCandles, 60_000);
 setInterval(pollFunding, 30_000);
 setInterval(pollStaking, 60_000);
 setInterval(pollStakingStats, 120_000);  // 2 min, matches cache TTL

@@ -38,13 +38,13 @@
     <button class="btn" data-hours="720">30d</button>
     <button class="btn" data-hours="0">ALL TIME</button>
   </div>
-  <div class="controls" style="margin-left:0">
+  <div class="controls" data-hide-mobile style="margin-left:0">
     <span class="mode-label">REFRESH</span>
     <button class="btn active" data-refresh="10">10s</button>
     <button class="btn" data-refresh="30">30s</button>
     <button class="btn" data-refresh="0">pause</button>
   </div>
-  <div class="controls" style="margin-left:0">
+  <div class="controls" data-hide-mobile style="margin-left:0">
     <span class="mode-label">BIG BUY</span>
     <select id="whaleSelect" style="font-size:10px;padding:4px 8px;letter-spacing:.1em;text-transform:uppercase">
       <option value="50000">≥ $50K</option>
@@ -230,6 +230,27 @@
 <div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
   <h2>Cumulative Volume Delta <span class="count">buy − sell pressure over time</span></h2>
   <div id="cvdChart" style="min-height:72px"></div>
+</div>
+
+<!-- LIT Price Chart -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>LIT Price
+    <span class="count" id="chartPriceLabel"></span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+      <button class="btn-sm" data-res="5m">5m</button>
+      <button class="btn-sm" data-res="15m">15m</button>
+      <button class="btn-sm active" data-res="1h">1h</button>
+      <button class="btn-sm" data-res="4h">4h</button>
+      <button class="btn-sm" data-res="1d">1d</button>
+    </span>
+  </h2>
+  <div id="litPriceChart" style="width:100%;height:200px;position:relative">
+    <div style="color:var(--ink-faint);font-size:11px;padding:12px 0">loading chart…</div>
+  </div>
+  <div id="litVolumeChart" style="width:100%;height:40px;margin-top:2px"></div>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:4px" id="chartAxisLabel">
+    <span></span><span></span>
+  </div>
 </div>
 
 <!-- Order Book Heatmap -->

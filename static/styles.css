@@ -246,3 +246,26 @@ footer .spacer{margin-left:auto}
   #chart{height:220px}
   .btn-sm{padding:4px 8px}
 }
+
+/* ── LIT page mobile ───────────────────────────────────────── */
+@media (max-width:768px){
+  /* tracked wallets table horizontal scroll */
+  #trackedTable{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* watchlist cards single column */
+  .cards{grid-template-columns:1fr !important}
+  /* lit page controls wrap */
+  .controls select{font-size:9px;padding:3px 5px}
+}
+@media (max-width:480px){
+  /* hide less important header controls on phone */
+  .controls[data-hide-mobile]{display:none}
+  /* kpis 2 col on lit page */
+  .kpis{grid-template-columns:repeat(2,1fr) !important}
+  /* chart height */
+  #litPriceChart{height:140px !important}
+  /* tab bar scroll */
+  .tab-bar{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap}
+  .tab{white-space:nowrap;flex-shrink:0}
+  /* acct card wrap */
+  .acct-card{grid-template-columns:1fr 1fr !important}
+}
