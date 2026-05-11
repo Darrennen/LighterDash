@@ -9,8 +9,9 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/static/styles.css" />
 <style>
-  .nav-pill{padding:4px 12px;border:1px solid var(--line-2);border-radius:3px;color:var(--ink-dim);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;text-decoration:none;transition:all .15s}
+  .nav-pill{padding:4px 10px;border:1px solid var(--line-2);border-radius:3px;color:var(--ink-dim);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;text-decoration:none;transition:all .15s}
   .nav-pill:hover{border-color:var(--accent);color:var(--ink)}
+  header{gap:14px !important}
   .acct{font-size:11px;color:var(--ink-dim);font-variant-numeric:tabular-nums}
   .rank{color:var(--ink-faint);font-size:11px;width:24px}
   .leaders-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
@@ -54,9 +55,11 @@
       <option value="1000000">≥ $1M</option>
     </select>
   </div>
-  <a href="/" class="nav-pill">← overview</a>
-  <a href="/explorer" class="nav-pill">explorer</a>
-  <a href="/watchlist" class="nav-pill">watchlist</a>
+  <div style="display:flex;gap:6px;margin-left:auto;flex-shrink:0">
+    <a href="/" class="nav-pill">overview</a>
+    <a href="/explorer" class="nav-pill">explorer</a>
+    <a href="/watchlist" class="nav-pill">watchlist</a>
+  </div>
   <div class="status">
     <span class="dot" id="statusDot"></span>
     <span id="statusText">connecting…</span>

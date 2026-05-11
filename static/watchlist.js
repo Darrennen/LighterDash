@@ -13,6 +13,7 @@ function twSet(list)  { try { localStorage.setItem(TW_KEY, JSON.stringify(list))
 function twAdd(id)    { const l = twGet(); if (!l.find(w => w.account_id===id)) { l.push({account_id:id,label:'',added_at:Date.now()}); twSet(l); return true; } return false; }
 function twRemove(id) { twSet(twGet().filter(w => w.account_id !== id)); }
 function twSetLabel(id, label) { const l = twGet(); const w = l.find(w=>w.account_id===id); if(w){w.label=label;twSet(l);} }
+function twSetAddress(id, addr) { const l = twGet(); const w = l.find(w=>w.account_id===id); if(w && !w.address){w.address=addr;twSet(l);} }
 
 // ── formatters ────────────────────────────────────────────────
 const fmtUsd = n => {
@@ -222,6 +223,7 @@ async function fetchOne(w) {
       return;
     }
     const data = await r.json();
+    if (data._address) twSetAddress(w.account_id, data._address);
     _data[w.account_id] = data;
     render();
   } catch {

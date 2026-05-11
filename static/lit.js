@@ -1012,12 +1012,7 @@ async function refreshTrackedRow(w) {
   if (w.address) params.set('address', w.address);
   try {
     const data = await apiGet(`/api/lit/account-flow-live?${params}`);
-    // cache address for future calls
-    if (!w.address) {
-      const list = twGet();
-      const entry = list.find(e => e.account_id === w.account_id);
-      // address comes back indirectly — look it up once
-    }
+    if (data._address && !w.address) twSetAddress(w.account_id, data._address);
     const fmt = (val, cls) => {
       const el = document.getElementById(val);
       if (!el) return;

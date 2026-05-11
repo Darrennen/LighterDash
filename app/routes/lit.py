@@ -243,6 +243,7 @@ async def account_flow_live(
             "net_usd":       buy_usd - sell_usd,
             "net_size":      buy_size - sell_size,
         }
+    result["_address"] = address  # let frontend cache this for future requests
     return result
 
 
