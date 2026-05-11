@@ -1045,7 +1045,8 @@ async function refreshTrackedRow(w) {
     set(`tw-net7d-${w.account_id}`,  (net7d  >= 0 ? '+' : '') + fmtUsd(net7d),  net7d  >= 0 ? 'var(--green)' : 'var(--red)');
     set(`tw-net30d-${w.account_id}`, (net30d >= 0 ? '+' : '') + fmtUsd(net30d), net30d >= 0 ? 'var(--green)' : 'var(--red)');
   } catch (e) {
-    const errText = 'error';
+    const msg = String(e.message || '');
+    const errText = msg.includes('404') ? 'not found' : msg.includes('429') ? 'rate limit' : 'error';
     ['tw-buy24','tw-sell24','tw-net24','tw-net7d','tw-net30d'].forEach(pfx => {
       const el = document.getElementById(`${pfx}-${w.account_id}`);
       if (el) { el.textContent = errText; el.style.color = 'var(--ink-faint)'; }

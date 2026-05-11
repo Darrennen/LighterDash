@@ -103,8 +103,10 @@ function render() {
 }
 
 function cardHTML(w) {
-  const d    = (_data[w.account_id] || {})[_period];
-  const loading = !d;
+  const raw   = _data[w.account_id];
+  const errMsg = raw?._error_msg;
+  const d    = (raw || {})[_period];
+  const loading = !raw;   // raw undefined = still fetching; raw._error = failed
 
   const buy    = d?.buy_usd  || 0;
   const sell   = d?.sell_usd || 0;
@@ -150,6 +152,8 @@ function cardHTML(w) {
          <div class="skeleton skeleton-sm"></div>
          <div class="skeleton skeleton-sm" style="width:40%"></div>
        </div>`
+    : raw?._error
+    ? `<div style="color:var(--ink-faint);font-size:11px;padding:8px 0">${errMsg || 'Account not found or no data available.'}</div>`
     : noData
     ? `<div style="color:var(--ink-faint);font-size:11px;padding:8px 0">No LIT trades found in this window.</div>`
     : `<div class="flow-row">
@@ -209,12 +213,19 @@ async function fetchOne(w) {
   if (w.address) params.set('address', w.address);
   try {
     const r = await fetch(`/api/lit/account-flow-live?${params}`);
-    if (!r.ok) throw new Error(r.status);
+    if (!r.ok) {
+      const msg = r.status === 404 ? 'Account not found on exchange.'
+               : r.status === 429 ? 'Rate limited — try again shortly.'
+               : `API error ${r.status}`;
+      _data[w.account_id] = { _error: true, _error_msg: msg };
+      render();
+      return;
+    }
     const data = await r.json();
     _data[w.account_id] = data;
-    render(); // update card as each resolves
+    render();
   } catch {
-    _data[w.account_id] = { _error: true };
+    _data[w.account_id] = { _error: true, _error_msg: 'Network error — check connection.' };
     render();
   }
 }
