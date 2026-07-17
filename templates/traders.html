@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Traders · Lighter Cockpit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+<style>
+  .nav-pill{padding:4px 12px;border:1px solid var(--line-2);border-radius:3px;color:var(--ink-dim);font-size:10px;letter-spacing:.14em;text-transform:uppercase;text-decoration:none;transition:all .15s}
+  .nav-pill:hover{border-color:var(--accent);color:var(--ink)}
+
+  .rank{color:var(--ink-faint);font-size:11px;width:24px}
+  .acct-link{color:var(--ink);text-decoration:none;font-variant-numeric:tabular-nums}
+  .acct-link:hover{color:var(--accent)}
+  .watch-link{margin-left:8px;color:var(--ink-faint);font-size:9px;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;border:1px solid var(--line-2);border-radius:2px;padding:1px 5px;transition:all .15s}
+  .watch-link:hover{color:var(--accent);border-color:var(--accent)}
+
+  .spotlight{border-left:2px solid var(--red)}
+
+  @media (max-width:900px){
+    #posTableWrap, #activeTableWrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <a href="/" class="mark" style="text-decoration:none">lighter</a>
+    <span class="sub">Traders</span>
+  </div>
+  <div style="display:flex;gap:6px;margin-left:auto;flex-shrink:0">
+    <a href="/lit" class="nav-pill">lit tracker</a>
+    <a href="/explorer" class="nav-pill">explorer</a>
+    <a href="/watchlist" class="nav-pill">watchlist</a>
+    <a href="/" class="nav-pill">← overview</a>
+  </div>
+  <div class="status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">connecting…</span>
+    <span style="color:var(--ink-faint);margin-left:12px">last sync <span id="lastSync">—</span></span>
+  </div>
+</header>
+
+<!-- KPI strip -->
+<section class="kpis">
+  <div class="kpi"><div class="lbl">24h Volume</div><div class="val" id="kpi-vol">—</div><div class="sub" id="kpi-vol-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">24h Trades</div><div class="val" id="kpi-trades">—</div><div class="sub" id="kpi-trades-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Unique Traders</div><div class="val" id="kpi-traders">—</div><div class="sub" id="kpi-traders-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Biggest Open Position</div><div class="val" id="kpi-biggest-pos">—</div><div class="sub" id="kpi-biggest-pos-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Largest Trade 24h</div><div class="val" id="kpi-biggest-trade">—</div><div class="sub" id="kpi-biggest-trade-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Tracking Since</div><div class="val" id="kpi-since" style="font-size:16px">—</div><div class="sub" id="kpi-since-sub">&nbsp;</div></div>
+</section>
+
+<!-- Most active traders -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>Most Active Traders <span class="count" id="activeDataSince"></span>
+    <span style="margin-left:auto;display:flex;gap:6px" id="windowToggle">
+      <button class="btn-sm" data-window="1h">1H</button>
+      <button class="btn-sm active" data-window="24h">24H</button>
+      <button class="btn-sm" data-window="7d">7D</button>
+    </span>
+  </h2>
+  <div id="activeTableWrap">
+    <table id="activeTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Account</th>
+          <th class="num">Volume</th>
+          <th class="num">Trades</th>
+          <th class="num">Buy / Sell</th>
+          <th class="num">Net Flow</th>
+          <th>Top Markets</th>
+          <th class="num">Biggest Trade</th>
+        </tr>
+      </thead>
+      <tbody id="activeBody"><tr><td colspan="8" class="empty">loading leaderboard…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Biggest open positions -->
+<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>Biggest Open Positions <span class="count">live account scan</span>
+    <span style="margin-left:auto;display:flex;gap:6px" id="posSortToggle">
+      <button class="btn-sm active" data-sort="notional">By Notional</button>
+      <button class="btn-sm" data-sort="liq">Closest To Liq</button>
+    </span>
+  </h2>
+  <div id="posTableWrap">
+    <table id="posTable">
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th>Market</th>
+          <th>Side</th>
+          <th class="num">Size</th>
+          <th class="num">Notional</th>
+          <th class="num">Entry</th>
+          <th class="num">Mark</th>
+          <th class="num">uPnL</th>
+          <th class="num">Leverage</th>
+          <th class="num">Liq Price</th>
+          <th class="num">Liq Dist</th>
+        </tr>
+      </thead>
+      <tbody id="posBody"><tr><td colspan="11" class="empty">scanning positions…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Closest to liquidation spotlight -->
+<div class="panel spotlight" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <h2>Closest To Liquidation <span class="count">highest risk position tracked</span></h2>
+  <div id="spotlightCard"><div class="empty" style="padding:24px 0">loading…</div></div>
+</div>
+
+<footer>
+  <span>backend · <a href="/docs" target="_blank">/docs</a> · <a href="/api/traders/status" target="_blank">/api/traders/status</a></span>
+  <span style="color:var(--ink-faint)">·</span>
+  <span style="color:var(--ink-faint)">est. metrics from tracked trades/positions — fees excluded, not exhaustive</span>
+  <div class="spacer"></div>
+  <span>data · <a href="https://lighter.xyz" target="_blank" style="color:var(--ink-dim)">lighter.xyz</a></span>
+  <span style="color:var(--ink-faint)">·</span>
+  <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
+</footer>
+
+<script type="module" src="/static/traders.js"></script>
+</body>
+</html>

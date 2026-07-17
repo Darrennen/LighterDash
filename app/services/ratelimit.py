@@ -35,3 +35,4 @@ class RateLimiter:
 # Shared instances — tuned conservatively for a public endpoint
 explorer_limiter  = RateLimiter(max_calls=20, window_secs=60)   # 20 account lookups / IP / min
 staking_limiter   = RateLimiter(max_calls=5,  window_secs=60)   # 5 staking-activity / IP / min
+traders_pnl_limiter = RateLimiter(max_calls=10, window_secs=60)  # 10 pnl reconstructions / IP / min

@@ -126,6 +126,14 @@ class LighterClient:
         accounts = j.get("accounts") or []
         return accounts[0] if accounts else {}
 
+    async def accounts_by_l1(self, address: str) -> dict:
+        """All sub-accounts registered under an L1 wallet address (public, no auth)."""
+        try:
+            return await self._get("/accountsByL1Address", params={"l1_address": address})
+        except httpx.HTTPError as e:
+            log.debug("accounts_by_l1(%s) failed: %s", address, e)
+            return {}
+
     async def candles(
         self, market_id: int, resolution: str = "1h", count: int = 24
     ) -> list[dict]:

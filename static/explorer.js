@@ -321,6 +321,172 @@ function drawFlowChart(series) {
   `;
 }
 
+// ── trader PnL (hero stats + PnL tab, from /api/traders/pnl) ──
+
+const PNL_POLL_MAX_ATTEMPTS = 6;
+const PNL_POLL_INTERVAL_MS = 3000;
+
+let _pnlData = null;
+let _pnlPollTimer = null;
+let _pnlAccountIndex = null;
+
+function resetPnlUI() {
+  clearTimeout(_pnlPollTimer);
+  _pnlPollTimer = null;
+  _pnlData = null;
+  const heroPnl = $('#heroPnl');
+  heroPnl.textContent = '—';
+  heroPnl.style.color = '';
+  $('#heroWinRate').textContent = '—';
+  $('#heroStreak').innerHTML = '—';
+  $('#heroVolume').textContent = '—';
+  $('#heroLongShort').innerHTML = '—';
+  $('#pnlHeroCaveat').textContent = 'building trader stats…';
+  $('#pnlChartEmpty').style.display = '';
+  $('#pnlChartEmpty').textContent = 'building…';
+  $('#pnlChart').style.display = 'none';
+  $('#pnlClosedBody').innerHTML = `<tr><td colspan="6" class="empty">building…</td></tr>`;
+}
+
+async function loadTradersPnl(accountIndex, attempt = 0) {
+  _pnlAccountIndex = accountIndex;
+  try {
+    const res = await fetch(`/api/traders/pnl?query=${accountIndex}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (_pnlAccountIndex !== accountIndex) return; // account changed since request fired
+
+    if (data.status && data.status !== 'ready') {
+      if (attempt < PNL_POLL_MAX_ATTEMPTS) {
+        _pnlPollTimer = setTimeout(() => loadTradersPnl(accountIndex, attempt + 1), PNL_POLL_INTERVAL_MS);
+      } else {
+        $('#pnlHeroCaveat').textContent = 'still building — check back shortly';
+        $('#pnlChartEmpty').textContent = 'still building — check back shortly';
+      }
+      return;
+    }
+
+    _pnlData = data;
+    renderPnlHero(data);
+    renderPnlTab(data);
+  } catch {
+    if (attempt < PNL_POLL_MAX_ATTEMPTS) {
+      _pnlPollTimer = setTimeout(() => loadTradersPnl(accountIndex, attempt + 1), PNL_POLL_INTERVAL_MS);
+    } else {
+      $('#pnlHeroCaveat').textContent = 'PnL data unavailable right now';
+      $('#pnlChartEmpty').textContent = 'PnL data unavailable right now';
+    }
+  }
+}
+
+function renderPnlHero(data) {
+  const pnl = parseFloat(data.realized_pnl_est || 0);
+  const pnlEl = $('#heroPnl');
+  pnlEl.textContent = (pnl >= 0 ? '+' : '') + fmtUsd(pnl);
+  pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : '';
+
+  const wins = data.wins || 0, losses = data.losses || 0;
+  $('#heroWinRate').textContent = data.win_rate != null
+    ? `${(data.win_rate * 100).toFixed(1)}% (${wins}W/${losses}L)`
+    : (wins + losses > 0 ? `${wins}W/${losses}L` : '—');
+
+  const best = data.best_streak, worst = data.worst_streak;
+  $('#heroStreak').innerHTML = (best != null || worst != null)
+    ? `<span style="color:var(--green)">${best ?? '—'}W</span> / <span style="color:var(--red)">${worst ?? '—'}L</span>`
+    : '—';
+
+  $('#heroVolume').textContent = data.volume_usd != null ? fmtUsd(data.volume_usd) : '—';
+
+  const lp = data.long_pnl, sp = data.short_pnl;
+  $('#heroLongShort').innerHTML = (lp != null || sp != null)
+    ? `<span style="color:${(lp ?? 0) >= 0 ? 'var(--green)' : 'var(--red)'}">${fmtUsd(lp ?? 0)}</span> / <span style="color:${(sp ?? 0) >= 0 ? 'var(--green)' : 'var(--red)'}">${fmtUsd(sp ?? 0)}</span>`
+    : '—';
+
+  const cov = data.coverage || {};
+  $('#pnlHeroCaveat').textContent = cov.fills != null
+    ? `est. from ${cov.fills} fill${cov.fills !== 1 ? 's' : ''}${cov.since_ts ? ' since ' + fmtMYT(cov.since_ts) : ''}, fees excl.${cov.complete === false ? ' · partial coverage' : ''}`
+    : 'estimates reconstructed from on-chain fills, fees excl.';
+}
+
+function renderPnlTab(data) {
+  const series = (data.pnl_timeseries || []).map(([t, v]) => ({
+    t: t > 1e12 ? t : t * 1000,
+    v: parseFloat(v),
+  }));
+  drawPnlChart(series);
+
+  const rows = data.recent_closed || [];
+  const tbody = $('#pnlClosedBody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">no closed round-trips yet</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const pnl = parseFloat(r.pnl || 0);
+    const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const isLong = (r.side || '').toLowerCase() === 'long';
+    return `<tr>
+      <td style="font-weight:600">${r.symbol || '—'}</td>
+      <td><span class="pill ${isLong ? 'buy' : 'sell'}">${r.side || '—'}</span></td>
+      <td class="num">$${fmtNum(parseFloat(r.entry), 4)} → $${fmtNum(parseFloat(r.exit), 4)}</td>
+      <td class="num">${fmtNum(parseFloat(r.size), 2)}</td>
+      <td class="num ${pnlCls}" style="font-weight:600">${(pnl >= 0 ? '+' : '') + fmtUsd(pnl)}</td>
+      <td class="num" style="color:var(--ink-faint);font-size:11px">${r.closed_ts ? fmtMYT(r.closed_ts) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function drawPnlChart(series) {
+  const svg = $('#pnlChart');
+  const empty = $('#pnlChartEmpty');
+  if (!svg) return;
+  if (!series.length) {
+    svg.style.display = 'none';
+    if (empty) { empty.style.display = ''; empty.textContent = 'no closed trades yet'; }
+    return;
+  }
+  svg.style.display = 'block';
+  if (empty) empty.style.display = 'none';
+
+  const W = 400, H = 120, P = 3;
+  const times = series.map(p => p.t);
+  const vals  = series.map(p => p.v);
+  const minT  = Math.min(...times), maxT = Math.max(...times);
+  const minV  = Math.min(...vals, 0), maxV = Math.max(...vals, 0);
+  const rangeT = (maxT - minT) || 1;
+  const rangeV = (maxV - minV) || 1;
+
+  const toX = t => P + (t - minT) / rangeT * (W - P * 2);
+  const toY = v => H - P - (v - minV) / rangeV * (H - P * 2);
+  const z   = toY(0);
+
+  const pts = series.map(p => `${toX(p.t).toFixed(1)},${toY(p.v).toFixed(1)}`).join(' ');
+  const firstX = toX(times[0]).toFixed(1);
+  const lastX  = toX(times[times.length - 1]).toFixed(1);
+  const area   = `M ${firstX},${z.toFixed(1)} ` +
+    series.map(p => `L ${toX(p.t).toFixed(1)},${toY(p.v).toFixed(1)}`).join(' ') +
+    ` L ${lastX},${z.toFixed(1)} Z`;
+
+  const lastVal = vals[vals.length - 1];
+  const col = lastVal >= 0 ? '#6fe089' : '#ff6a77';
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="pgUp" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#6fe089" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="#6fe089" stop-opacity="0.03"/>
+      </linearGradient>
+      <linearGradient id="pgDn" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0%" stop-color="#ff6a77" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="#ff6a77" stop-opacity="0.03"/>
+      </linearGradient>
+    </defs>
+    <line x1="0" y1="${z.toFixed(1)}" x2="${W}" y2="${z.toFixed(1)}" stroke="#1d2124" stroke-width="1"/>
+    <path d="${area}" fill="url(#${lastVal >= 0 ? 'pgUp' : 'pgDn'})" stroke="none"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+  `;
+}
+
 // ── render functions ──────────────────────────────────────────
 
 function renderAccount(data, priceMap = {}) {
@@ -367,6 +533,14 @@ function renderAccount(data, priceMap = {}) {
   });
   $('#acctStatus').appendChild(trackBtn);
 
+  const watchLink = document.createElement('a');
+  watchLink.className = 'ext-link';
+  watchLink.style.marginLeft = '10px';
+  watchLink.href = `/watch?q=${idx}`;
+  watchLink.target = '_blank';
+  watchLink.textContent = 'watch live ↗';
+  $('#acctStatus').appendChild(watchLink);
+
   renderPortfolioSummary(data, priceMap);
 
   // tab counts
@@ -387,6 +561,11 @@ function renderAccount(data, priceMap = {}) {
   _flowPeriod = 'all';
   $$('[data-flow-period]').forEach(b => b.classList.toggle('active', b.dataset.flowPeriod === 'all'));
   fetchFillsBackground(_histAddress, idx);
+
+  // background fetch for trader PnL hero + PnL tab (may not be live yet — polls/retries quietly)
+  resetPnlUI();
+  loadTradersPnl(idx);
+
   _histOffset = 0;
   $('#litHistBody').innerHTML = `<tr><td colspan="7" class="empty">click the "Trade History" tab to load</td></tr>`;
   $('#histPrevBtn').style.display = 'none';

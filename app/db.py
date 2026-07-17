@@ -51,6 +51,40 @@ CREATE TABLE IF NOT EXISTS lit_backfill_log (
     backfilled_at  INTEGER NOT NULL,
     trades_found   INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS all_trades (
+    trade_id       TEXT    PRIMARY KEY,
+    market_id      INTEGER NOT NULL,
+    symbol         TEXT    NOT NULL,
+    ts             INTEGER NOT NULL,
+    price          REAL    NOT NULL,
+    size           REAL    NOT NULL,
+    usd            REAL    NOT NULL,
+    bid_account    INTEGER NOT NULL,
+    ask_account    INTEGER NOT NULL,
+    taker_is_buyer INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_all_trades_ts
+    ON all_trades (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_all_trades_bid
+    ON all_trades (bid_account, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_all_trades_ask
+    ON all_trades (ask_account, ts DESC);
+
+CREATE TABLE IF NOT EXISTS account_snapshots (
+    account_index     INTEGER PRIMARY KEY,
+    l1_address        TEXT,
+    ts                INTEGER NOT NULL,
+    collateral        REAL,
+    total_asset_value REAL,
+    payload           TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS account_pnl_cache (
+    account_key TEXT    PRIMARY KEY,
+    ts          INTEGER NOT NULL,
+    payload     TEXT    NOT NULL
+);
 """
 
 
@@ -421,3 +455,251 @@ async def fetch_lit_stats() -> dict[str, Any]:
         "oldest_trade_ts": row[1],
         "newest_trade_ts": row[2],
     }
+
+
+# ── Traders feature: all-market trade ledger ─────────────────────────
+
+async def write_all_trades(trades: list[dict[str, Any]]) -> int:
+    if not trades:
+        return 0
+    payload = [
+        (t["trade_id"], t["market_id"], t["symbol"], t["ts"], t["price"],
+         t["size"], t["usd"], t["bid_account"], t["ask_account"], t["taker_is_buyer"])
+        for t in trades
+    ]
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.executemany(
+            """INSERT OR IGNORE INTO all_trades
+               (trade_id, market_id, symbol, ts, price, size, usd,
+                bid_account, ask_account, taker_is_buyer)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            payload,
+        )
+        await db.commit()
+    return len(payload)
+
+
+async def prune_all_trades(max_age_days: int = 8) -> int:
+    cutoff = int(time.time() * 1000) - max_age_days * 86400 * 1000
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute("DELETE FROM all_trades WHERE ts < ?", (cutoff,))
+        await db.commit()
+        return cur.rowcount or 0
+
+
+async def fetch_all_trades_status() -> dict[str, Any]:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute("SELECT COUNT(*), MIN(ts), MAX(ts) FROM all_trades")
+        row = await cur.fetchone()
+        cur2 = await db.execute("SELECT COUNT(*) FROM account_snapshots")
+        row2 = await cur2.fetchone()
+    return {
+        "all_trades_count": row[0] or 0,
+        "data_since": row[1],
+        "newest_trade_ts": row[2],
+        "account_snapshots_count": row2[0] or 0,
+    }
+
+
+# Known protocol/pool accounts (e.g. the LIT staking pool) are not traders —
+# exclude them from rankings and scans. High indices near 2^48 are otherwise
+# legitimate sub-accounts (account_type=1), so no magnitude-based filtering.
+SYSTEM_ACCOUNTS = (281_474_976_710_654,)  # LIT staking pool
+_SYS_NOT_IN = f"NOT IN ({','.join(str(a) for a in SYSTEM_ACCOUNTS)})"
+
+
+async def fetch_leaderboard(hours: int, limit: int = 50) -> dict[str, Any]:
+    """Aggregate per-account volume/buy/sell/net over all_trades for the given window.
+
+    An account's volume counts once for each side (bid or ask) it participated in
+    across distinct trades — a single trade cannot have the same account on both
+    sides, so summing the bid-side and ask-side contributions is safe.
+    """
+    since_ms = int((time.time() - hours * 3600) * 1000)
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """SELECT COALESCE(SUM(usd), 0), COUNT(*) FROM all_trades WHERE ts >= ?""",
+            (since_ms,),
+        )
+        vol_row = await cur.fetchone()
+
+        cur = await db.execute(
+            f"""SELECT COUNT(*) FROM (
+                 SELECT bid_account AS a FROM all_trades
+                 WHERE ts >= ? AND bid_account > 0 AND bid_account {_SYS_NOT_IN}
+                 UNION
+                 SELECT ask_account AS a FROM all_trades
+                 WHERE ts >= ? AND ask_account > 0 AND ask_account {_SYS_NOT_IN}
+               )""",
+            (since_ms, since_ms),
+        )
+        uniq_row = await cur.fetchone()
+
+        cur = await db.execute("SELECT MIN(ts) FROM all_trades")
+        since_row = await cur.fetchone()
+        data_since = since_row[0] if since_row else None
+
+        cur = await db.execute(
+            f"""WITH sides AS (
+                 SELECT bid_account AS account_index, usd, symbol, 1 AS is_buy
+                 FROM all_trades
+                 WHERE ts >= ? AND bid_account > 0 AND bid_account {_SYS_NOT_IN}
+                 UNION ALL
+                 SELECT ask_account AS account_index, usd, symbol, 0 AS is_buy
+                 FROM all_trades
+                 WHERE ts >= ? AND ask_account > 0 AND ask_account {_SYS_NOT_IN}
+               )
+               SELECT account_index,
+                      SUM(usd) AS volume_usd,
+                      COUNT(*) AS trades,
+                      SUM(CASE WHEN is_buy=1 THEN usd ELSE 0 END) AS buy_usd,
+                      SUM(CASE WHEN is_buy=0 THEN usd ELSE 0 END) AS sell_usd,
+                      MAX(usd) AS biggest_trade_usd
+               FROM sides
+               GROUP BY account_index
+               ORDER BY volume_usd DESC
+               LIMIT ?""",
+            (since_ms, since_ms, limit),
+        )
+        leader_rows = await cur.fetchall()
+        account_ids = [r[0] for r in leader_rows]
+
+        top_symbols: dict[int, list[str]] = {}
+        if account_ids:
+            placeholders = ",".join("?" for _ in account_ids)
+            cur = await db.execute(
+                f"""WITH sides AS (
+                      SELECT bid_account AS account_index, usd, symbol
+                      FROM all_trades WHERE ts >= ? AND bid_account IN ({placeholders})
+                      UNION ALL
+                      SELECT ask_account AS account_index, usd, symbol
+                      FROM all_trades WHERE ts >= ? AND ask_account IN ({placeholders})
+                    ),
+                    ranked AS (
+                      SELECT account_index, symbol, SUM(usd) AS sym_usd,
+                             ROW_NUMBER() OVER (
+                                 PARTITION BY account_index ORDER BY SUM(usd) DESC
+                             ) AS rn
+                      FROM sides GROUP BY account_index, symbol
+                    )
+                    SELECT account_index, symbol FROM ranked WHERE rn <= 2""",
+                (since_ms, *account_ids, since_ms, *account_ids),
+            )
+            for account_index, symbol in await cur.fetchall():
+                top_symbols.setdefault(account_index, []).append(symbol)
+
+    leaders = [
+        {
+            "account_index": r[0],
+            "volume_usd": r[1] or 0.0,
+            "trades": r[2] or 0,
+            "buy_usd": r[3] or 0.0,
+            "sell_usd": r[4] or 0.0,
+            "net_usd": (r[3] or 0.0) - (r[4] or 0.0),
+            "top_symbols": top_symbols.get(r[0], []),
+            "biggest_trade_usd": r[5] or 0.0,
+        }
+        for r in leader_rows
+    ]
+
+    return {
+        "data_since": data_since,
+        "totals": {
+            "volume_usd": vol_row[0] or 0.0,
+            "trades": vol_row[1] or 0,
+            "unique_accounts": uniq_row[0] or 0,
+        },
+        "leaders": leaders,
+    }
+
+
+async def fetch_top_trade_accounts(hours: int = 24, limit: int = 150) -> list[int]:
+    """Top unique account indexes by USD volume (bid + ask side) over the window."""
+    since_ms = int((time.time() - hours * 3600) * 1000)
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            f"""SELECT account_index, SUM(usd) AS vol FROM (
+                 SELECT bid_account AS account_index, usd FROM all_trades
+                 WHERE ts >= ? AND bid_account > 0 AND bid_account {_SYS_NOT_IN}
+                 UNION ALL
+                 SELECT ask_account AS account_index, usd FROM all_trades
+                 WHERE ts >= ? AND ask_account > 0 AND ask_account {_SYS_NOT_IN}
+               ) GROUP BY account_index ORDER BY vol DESC LIMIT ?""",
+            (since_ms, since_ms, limit),
+        )
+        rows = await cur.fetchall()
+    return [int(r[0]) for r in rows if r[0]]
+
+
+async def upsert_account_snapshot(
+    account_index: int, l1_address: str, ts: int,
+    collateral: float, total_asset_value: float, payload: str,
+) -> None:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO account_snapshots
+               (account_index, l1_address, ts, collateral, total_asset_value, payload)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(account_index) DO UPDATE SET
+                 l1_address=excluded.l1_address,
+                 ts=excluded.ts,
+                 collateral=excluded.collateral,
+                 total_asset_value=excluded.total_asset_value,
+                 payload=excluded.payload""",
+            (account_index, l1_address, ts, collateral, total_asset_value, payload),
+        )
+        await db.commit()
+
+
+async def fetch_snapshot_ages(account_indexes: list[int]) -> dict[int, int]:
+    """Map account_index -> last snapshot ts, for accounts already in the table."""
+    if not account_indexes:
+        return {}
+    placeholders = ",".join("?" for _ in account_indexes)
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            f"SELECT account_index, ts FROM account_snapshots WHERE account_index IN ({placeholders})",
+            account_indexes,
+        )
+        rows = await cur.fetchall()
+    return {int(r[0]): int(r[1]) for r in rows}
+
+
+async def fetch_account_snapshots(limit: int = 500) -> list[dict[str, Any]]:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            f"""SELECT account_index, l1_address, ts, payload
+               FROM account_snapshots
+               WHERE account_index {_SYS_NOT_IN}
+               ORDER BY ts DESC LIMIT ?""",
+            (limit,),
+        )
+        rows = await cur.fetchall()
+    return [
+        {"account_index": r[0], "l1_address": r[1], "ts": r[2], "payload": r[3]}
+        for r in rows
+    ]
+
+
+async def fetch_pnl_cache(account_key: str) -> dict[str, Any] | None:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT ts, payload FROM account_pnl_cache WHERE account_key = ?",
+            (account_key,),
+        )
+        row = await cur.fetchone()
+    if not row:
+        return None
+    return {"ts": row[0], "payload": row[1]}
+
+
+async def upsert_pnl_cache(account_key: str, ts: int, payload: str) -> None:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO account_pnl_cache (account_key, ts, payload)
+               VALUES (?, ?, ?)
+               ON CONFLICT(account_key) DO UPDATE SET
+                 ts=excluded.ts, payload=excluded.payload""",
+            (account_key, ts, payload),
+        )
+        await db.commit()

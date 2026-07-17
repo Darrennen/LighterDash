@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Watch · Lighter Cockpit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+<style>
+  .nav-pill{padding:4px 12px;border:1px solid var(--line-2);border-radius:3px;color:var(--ink-dim);font-size:10px;letter-spacing:0.14em;text-transform:uppercase;text-decoration:none;transition:all .15s}
+  .nav-pill:hover{border-color:var(--accent);color:var(--ink)}
+
+  /* ── search / empty state ─────────────────────────────── */
+  .search-wrap{display:flex;gap:8px;align-items:center;max-width:520px}
+  .search-input{flex:1;background:var(--bg);border:1px solid var(--line-2);border-radius:3px;padding:8px 14px;font-family:inherit;font-size:13px;color:var(--ink);outline:none;transition:border-color .15s}
+  .search-input:focus{border-color:var(--accent)}
+  .search-input::placeholder{color:var(--ink-faint)}
+  .search-btn{padding:8px 18px;background:var(--accent);color:#000;border:none;border-radius:3px;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.1em;cursor:pointer;text-transform:uppercase;transition:opacity .15s}
+  .search-btn:hover{opacity:.85}
+
+  /* ── top bar ───────────────────────────────────────────── */
+  .watch-topbar{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:1px;background:var(--line);border-bottom:1px solid var(--line)}
+  .watch-topbar > div{background:var(--bg);padding:16px 20px}
+  .wtb-lbl{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:6px}
+  .wtb-val{font-family:'Fraunces',serif;font-weight:500;font-size:24px;letter-spacing:-.02em;line-height:1}
+  .wtb-sub{font-size:11px;color:var(--ink-dim);margin-top:5px}
+  .wtb-acct{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:18px}
+
+  /* ── main layout: chart + rail ─────────────────────────── */
+  .watch-main{display:grid;grid-template-columns:2.1fr 1fr;gap:1px;background:var(--line)}
+  .watch-main > *{background:var(--bg)}
+  @media (max-width:1000px){.watch-main{grid-template-columns:1fr}}
+
+  .chart-hd{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .chart-hd .sym{font-size:16px;font-weight:700;letter-spacing:.02em}
+  .chart-hd .px{font-size:15px}
+  .res-btns{margin-left:auto;display:flex;gap:4px}
+
+  .legend-line{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:10px;color:var(--ink-dim);margin-top:6px}
+  .legend-swatch{display:inline-block;width:14px;height:0;border-top:2px dashed;vertical-align:middle;margin-right:5px}
+
+  /* ── position rail ─────────────────────────────────────── */
+  .rail{padding:18px 16px;display:flex;flex-direction:column;gap:1px;background:var(--line);overflow-y:auto;max-height:calc(100vh - 260px)}
+  .pos-card{background:var(--panel);padding:12px 14px;cursor:pointer;border-left:2px solid transparent;transition:background .12s,border-color .12s}
+  .pos-card:hover{background:var(--panel-2)}
+  .pos-card.selected{background:rgba(224,255,107,0.06);border-left-color:var(--accent)}
+  .pos-card .pc-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .pos-card .pc-sym{font-weight:700;font-size:13px}
+  .pos-card .pc-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:11px}
+  .pos-card .pc-lbl{color:var(--ink-faint);font-size:9px;letter-spacing:.08em;text-transform:uppercase}
+  .pos-card .pc-liqbar{height:3px;background:var(--line);border-radius:2px;margin-top:6px}
+  .pos-card .pc-liqbar>div{height:100%;border-radius:2px}
+
+  .empty-big{color:var(--ink-faint);font-style:italic;padding:60px 20px;text-align:center;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <a href="/" class="mark" style="text-decoration:none">lighter</a>
+    <span class="sub">Watch</span>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <a href="/traders" class="nav-pill">← traders</a>
+    <a id="explorerLink" href="/explorer" class="nav-pill">explorer ↗</a>
+  </div>
+</header>
+
+<!-- empty state: no ?q= param -->
+<section id="promptSection" style="padding:60px 0;display:none">
+  <div style="max-width:560px;margin:0 auto;padding:0 20px">
+    <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px">Watch an account live</div>
+    <div class="search-wrap">
+      <input id="watchInput" class="search-input" type="text"
+        placeholder="Account # (e.g. 8913) or 0x wallet address" autocomplete="off" spellcheck="false" />
+      <button id="watchBtn" class="search-btn">Watch</button>
+    </div>
+    <div style="font-size:10px;color:var(--ink-faint);margin-top:6px">
+      Spectate a trader's live positions against the price chart — hl.eco MLM-mode style.
+    </div>
+  </div>
+</section>
+
+<div id="errorBox" style="display:none;padding:14px 18px;background:rgba(255,90,90,0.08);border:1px solid var(--red);border-radius:3px;color:var(--red);font-size:13px;margin:16px 20px"></div>
+
+<!-- main watch view -->
+<div id="watchView" style="display:none">
+
+  <div class="watch-topbar">
+    <div>
+      <div class="wtb-lbl">Account</div>
+      <div class="wtb-acct" id="wAcct">—</div>
+      <div class="wtb-sub" id="wAddr">—</div>
+    </div>
+    <div>
+      <div class="wtb-lbl">Equity</div>
+      <div class="wtb-val" id="wEquity">—</div>
+    </div>
+    <div>
+      <div class="wtb-lbl">Total Unrealized PnL</div>
+      <div class="wtb-val" id="wUpnl">—</div>
+    </div>
+    <div>
+      <div class="wtb-lbl">Leverage</div>
+      <div class="wtb-val" id="wLev">—</div>
+      <div class="wtb-sub" id="wStatus">—</div>
+    </div>
+  </div>
+
+  <div class="watch-main">
+    <!-- chart panel -->
+    <div class="panel">
+      <div class="chart-hd">
+        <span class="sym" id="chartSym">—</span>
+        <span class="px" id="chartPx"></span>
+        <div class="res-btns">
+          <button class="btn-sm" data-res="5m">5m</button>
+          <button class="btn-sm" data-res="15m">15m</button>
+          <button class="btn-sm active" data-res="1h">1h</button>
+          <button class="btn-sm" data-res="4h">4h</button>
+          <button class="btn-sm" data-res="1d">1d</button>
+        </div>
+      </div>
+      <div id="candleChart" style="width:100%;height:380px;position:relative">
+        <div style="color:var(--ink-faint);font-size:11px;padding:12px 0">loading chart…</div>
+      </div>
+      <div id="chartAxisLabel" style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:6px">
+        <span></span><span></span>
+      </div>
+      <div class="legend-line" id="chartLegend"></div>
+    </div>
+
+    <!-- position rail -->
+    <div>
+      <div style="padding:14px 16px 0"><span class="section-lbl">Open Positions</span></div>
+      <div class="rail" id="posRail"></div>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <span>backend · <a href="/docs" target="_blank">/docs</a></span>
+  <span style="color:var(--ink-faint)">·</span>
+  <span>data via mainnet.zklighter.elliot.ai public API</span>
+  <span style="color:var(--ink-faint)">·</span>
+  <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
+</footer>
+
+<script type="module" src="/static/watch.js"></script>
+</body>
+</html>
