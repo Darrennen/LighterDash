@@ -8,7 +8,7 @@ const state = {
   marketsById: new Map(),
   trades: [],
   whaleTrades: [],
-  whaleThreshold: 50000,
+  whaleThreshold: 10000,
   sortKey: 'volume_24h',
   sortDir: -1,
   filter: '',
@@ -61,31 +61,38 @@ async function apiGet(path) {
 
 function renderKpis(summary) {
   if (!summary) return;
-  $('#kpi-vol').textContent = fmtUsd(summary.total_volume_24h);
-  $('#kpi-vol-sub').textContent = 'quote · all markets';
+  // volume card
+  $('#volHero').textContent = fmtUsd(summary.total_volume_24h);
+  $('#statTrades').textContent = Number(summary.total_trades_24h).toLocaleString();
+  $('#statMkts').textContent = summary.active_markets + ' / ' + summary.listed_markets;
   const avgF = summary.avg_funding_weighted;
   if (avgF != null) {
-    $('#kpi-funding').textContent = (avgF * 100).toFixed(4) + '%';
-    $('#kpi-funding').className = 'val ' + (avgF > 0 ? 'up' : avgF < 0 ? 'down' : 'neutral');
-    const apr = avgF * 3 * 365 * 100;
-    $('#kpi-funding-sub').textContent = apr.toFixed(1) + '% APR · vol-weighted';
-  } else {
-    $('#kpi-funding').textContent = '—';
-    $('#kpi-funding-sub').textContent = 'waiting for data';
+    $('#statFunding').textContent = (avgF * 100).toFixed(4) + '%';
+    $('#statFunding').className = 'v ' + (avgF > 0 ? 'up' : avgF < 0 ? 'down' : '');
+    $('#statApr').textContent = (avgF * 3 * 365 * 100).toFixed(1) + '%';
   }
-  $('#kpi-mkts').textContent = summary.active_markets + ' / ' + summary.listed_markets;
-  $('#kpi-mkts-sub').textContent = 'trading · listed';
-  $('#kpi-trades').textContent = Number(summary.total_trades_24h).toLocaleString();
-  $('#kpi-trades-sub').textContent = 'executions · 24h';
-
   const g = summary.top_gainer, l = summary.top_loser;
-  if (g) {
-    $('#kpi-gainer').innerHTML = `<span class="sym">${g.symbol}</span> <span class="up" style="font-size:14px">${fmtPct(g.price_change)}</span>`;
-    $('#kpi-gainer-sub').textContent = fmtUsd(g.last_price);
-  }
-  if (l) {
-    $('#kpi-loser').innerHTML = `<span class="sym">${l.symbol}</span> <span class="down" style="font-size:14px">${fmtPct(l.price_change)}</span>`;
-    $('#kpi-loser-sub').textContent = fmtUsd(l.last_price);
+  if (g) $('#statGainer').innerHTML = `<span class="sym">${g.symbol}</span> <span class="up">${fmtPct(g.price_change)}</span>`;
+  if (l) $('#statLoser').innerHTML = `<span class="sym">${l.symbol}</span> <span class="down">${fmtPct(l.price_change)}</span>`;
+
+  // open interest hero (live sum across markets)
+  const oi = state.markets.reduce((s, m) => s + (m.oi_usd || 0), 0);
+  if (oi > 0) $('#oiHero').textContent = fmtUsd(oi);
+
+  // LIT hero price
+  const lit = state.markets.find(m => m.symbol === 'LIT' && m.market_type !== 'spot') ||
+              state.marketsById.get(120);
+  if (lit) {
+    $('#litPrice').textContent = '$' + Number(lit.last_price).toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+    const chip = $('#litChg');
+    chip.style.display = '';
+    chip.className = 'chg-chip ' + (lit.price_change >= 0 ? 'up' : 'down');
+    chip.textContent = fmtPct(lit.price_change) + ' · 24h';
+    const spot = state.markets.find(m => m.symbol === 'LIT/USDC');
+    $('#litSub').innerHTML =
+      `Vol ${fmtUsd(lit.volume_24h)} · ${Number(lit.trades_24h).toLocaleString()} trades` +
+      (lit.funding != null ? ` · funding ${(lit.funding * 100).toFixed(4)}%` : '') +
+      (spot ? ` · spot ${fmtUsd(spot.last_price)}` : '');
   }
 }
 
@@ -179,8 +186,8 @@ function renderHeatmap() {
     const r = m.funding;
     const intensity = Math.min(Math.abs(r) / max, 1);
     const bg = r >= 0
-      ? `rgba(111,224,137,${0.1 + intensity * 0.5})`
-      : `rgba(255,106,119,${0.1 + intensity * 0.5})`;
+      ? `rgba(67,221,140,${0.1 + intensity * 0.5})`
+      : `rgba(255,107,129,${0.1 + intensity * 0.5})`;
     const apr = (r * 3 * 365 * 100).toFixed(1);
     return `<div class="hm-cell" style="background:${bg}" title="${m.symbol} · ${apr}% APR · click for history" data-mid="${m.market_id}">
       <div class="s">${m.symbol}</div>
@@ -221,9 +228,9 @@ async function renderFlow() {
 
 function renderMovers() {
   const byChange = state.markets.slice().sort((a, b) => b.price_change - a.price_change);
-  const gain = byChange.filter(m => m.price_change > 0).slice(0, 6);
-  const lose = byChange.filter(m => m.price_change < 0).slice(-6).reverse();
-  const volLead = state.markets.slice().sort((a, b) => b.volume_24h - a.volume_24h).slice(0, 6);
+  const gain = byChange.filter(m => m.price_change > 0).slice(0, 5);
+  const lose = byChange.filter(m => m.price_change < 0).slice(-5).reverse();
+  const volLead = state.markets.slice().sort((a, b) => b.volume_24h - a.volume_24h).slice(0, 5);
 
   const row = (m, cls) => `
     <tr>
@@ -242,21 +249,19 @@ function renderMovers() {
 }
 
 function renderLiqs() {
-  const tbody = $('#liqBody');
   const liqs = state.trades.filter(t => t.is_liq).slice(0, 50);
-  $('#liqCount').textContent = liqs.length + ' events';
-  if (!liqs.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty">no liquidations in recent sample</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = liqs.map(t => `
-    <tr>
-      <td style="color:var(--ink-dim)">${fmtTime(t.ts)}</td>
-      <td class="sym">${t.symbol}</td>
-      <td><span class="pill ${t.side}">${t.side}</span></td>
-      <td class="num">${fmtUsd(t.price)}</td>
-      <td class="num down">${fmtUsd(t.usd)}</td>
-    </tr>`).join('');
+  const totalUsd = liqs.reduce((s, t) => s + t.usd, 0);
+  $('#liqHero').textContent = liqs.length ? fmtUsd(totalUsd) : '$0';
+  $('#liqSub').textContent = liqs.length
+    ? `${liqs.length} events · last 500 trades sample`
+    : 'none in last 500 trades sample';
+  $('#liqFeed').innerHTML = liqs.slice(0, 5).map(t => `
+    <div style="display:flex;gap:8px;align-items:center">
+      <span style="color:var(--ink-faint)">${fmtTime(t.ts)}</span>
+      <span class="sym">${t.symbol}</span>
+      <span class="pill ${t.side}" style="font-size:9px">${t.side}</span>
+      <span class="num down" style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtUsd(t.usd)}</span>
+    </div>`).join('');
 }
 
 // ── chart hover: crosshair + tooltip ─────────────────────────
@@ -592,6 +597,175 @@ function drawChart(points, field) {
   `;
 }
 
+// ── hero cards: LIT candles + protocol history ───────────────
+const litState = { res: '1d', cnt: 60, hover: null };
+
+function drawLitCandles(rawCandles) {
+  const svg = $('#litChart');
+  if (!svg) return;
+  const W = 760, H = 240;
+  const pad = { t: 10, r: 10, b: 24, l: 58 };
+  svg.innerHTML = '';
+  litState.hover = null;
+
+  const norm = c => ({
+    t: c.t || c.time || c.timestamp || c.open_time || 0,
+    o: parseFloat(c.o ?? c.open), h: parseFloat(c.h ?? c.high),
+    l: parseFloat(c.l ?? c.low), c: parseFloat(c.c ?? c.close),
+  });
+  const data = (rawCandles || []).map(norm).filter(c => !isNaN(c.o) && !isNaN(c.c));
+  if (!data.length) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:12px">no candle data</text>`;
+    return;
+  }
+
+  const yMin = Math.min(...data.map(c => c.l));
+  const yMax = Math.max(...data.map(c => c.h));
+  const yPad = (yMax - yMin || 0.001) * 0.07;
+  const y0 = yMin - yPad, y1 = yMax + yPad;
+  const cH = H - pad.t - pad.b, cW = W - pad.l - pad.r;
+  const sy = v => pad.t + (1 - (v - y0) / (y1 - y0)) * cH;
+  const n = data.length, slotW = cW / n;
+  const bodyW = Math.max(2, slotW * 0.55);
+
+  let out = '';
+  for (let i = 0; i <= 3; i++) {
+    const v = y0 + ((y1 - y0) * i) / 3;
+    const y = sy(v).toFixed(1);
+    out += `<line x1="${pad.l}" x2="${W-pad.r}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+    out += `<text x="${pad.l-6}" y="${parseFloat(y)+4}" text-anchor="end" fill="var(--ink-faint)" style="font-size:10px;font-family:var(--mono)">$${v.toFixed(3)}</text>`;
+  }
+  data.forEach((c, i) => {
+    const cx = (pad.l + (i + 0.5) * slotW).toFixed(1);
+    const isUp = c.c >= c.o;
+    const col = isUp ? 'var(--green)' : 'var(--red)';
+    const bTop = sy(Math.max(c.o, c.c)).toFixed(1);
+    const bBot = sy(Math.min(c.o, c.c)).toFixed(1);
+    const bH = Math.max(1, parseFloat(bBot) - parseFloat(bTop)).toFixed(1);
+    out += `<line x1="${cx}" x2="${cx}" y1="${sy(c.h).toFixed(1)}" y2="${sy(c.l).toFixed(1)}" stroke="${col}" stroke-width="1" opacity="0.6"/>`;
+    out += `<rect x="${(parseFloat(cx)-bodyW/2).toFixed(1)}" y="${bTop}" width="${bodyW.toFixed(1)}" height="${bH}" rx="1" fill="${col}" opacity="0.9"/>`;
+  });
+  const step = Math.max(1, Math.floor(n / 5));
+  for (let i = 0; i < n; i += step) {
+    const ts = data[i].t > 1e12 ? data[i].t : data[i].t * 1000;
+    const lbl = new Date(ts).toLocaleString('en-GB', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    out += `<text x="${(pad.l+(i+0.5)*slotW).toFixed(1)}" y="${H-7}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:10px;font-family:var(--mono)">${lbl}</text>`;
+  }
+  out += `<g id="litHoverG" style="display:none"><line id="litHoverX" y1="${pad.t}" y2="${H-pad.b}" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="2 3"/></g>`;
+  svg.innerHTML = out;
+  litState.hover = { data, pad, slotW, W };
+}
+
+function setupLitHover() {
+  const svg = $('#litChart'), tip = $('#litTip');
+  if (!svg || !tip) return;
+  const hide = () => {
+    tip.style.display = 'none';
+    const g = svg.querySelector('#litHoverG');
+    if (g) g.style.display = 'none';
+  };
+  svg.addEventListener('mouseleave', hide);
+  svg.addEventListener('mousemove', e => {
+    const g = svg.querySelector('#litHoverG');
+    if (!litState.hover || !g) return hide();
+    const { data, pad, slotW, W } = litState.hover;
+    const r = svg.getBoundingClientRect();
+    const mx = (e.clientX - r.left) * W / r.width;
+    const i = Math.min(data.length - 1, Math.max(0, Math.floor((mx - pad.l) / slotW)));
+    const c = data[i];
+    const cx = pad.l + (i + 0.5) * slotW;
+    const ts = c.t > 1e12 ? c.t : c.t * 1000;
+    const cls = c.c >= c.o ? 'up' : 'down';
+    const line = svg.querySelector('#litHoverX');
+    line.setAttribute('x1', cx.toFixed(1));
+    line.setAttribute('x2', cx.toFixed(1));
+    g.style.display = '';
+    tip.innerHTML = `<div class="tt">${new Date(ts).toLocaleString('en-GB',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` +
+      `O $${c.o.toFixed(4)} · H <span class="up">$${c.h.toFixed(4)}</span> · L <span class="down">$${c.l.toFixed(4)}</span> · C <span class="${cls}">$${c.c.toFixed(4)}</span>`;
+    tip.style.display = 'block';
+    const px = cx / W * r.width;
+    if (px > r.width * 0.55) { tip.style.left = 'auto'; tip.style.right = (r.width - px + 12) + 'px'; }
+    else { tip.style.right = 'auto'; tip.style.left = (px + 12) + 'px'; }
+    tip.style.top = Math.max(4, Math.min(e.clientY - r.top - 14, r.height - 64)) + 'px';
+  });
+}
+
+async function loadLitChart() {
+  try {
+    const j = await apiGet(`/api/candles/120?resolution=${litState.res}&count=${litState.cnt}`);
+    drawLitCandles(j.candles || []);
+  } catch (e) { drawLitCandles([]); }
+}
+
+function drawVolBars(rows) {
+  const svg = $('#volBars');
+  if (!svg) return;
+  const W = 520, H = 90, padB = 14;
+  if (!rows || !rows.length) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:11px">volume ledger warming up</text>`;
+    return;
+  }
+  const max = Math.max(...rows.map(r => r.usd), 1);
+  const slot = W / rows.length;
+  const bw = Math.max(2, slot * 0.62);
+  let out = '';
+  rows.forEach((r, i) => {
+    const h = Math.max(1.5, (r.usd / max) * (H - padB - 4));
+    const x = (i * slot + (slot - bw) / 2).toFixed(1);
+    const t = new Date(r.ts * 1000).toLocaleString('en-GB', { weekday:'short', hour:'2-digit', minute:'2-digit' });
+    out += `<rect x="${x}" y="${(H - padB - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5" fill="var(--accent)" opacity="0.75"><title>${t} · ${fmtUsd(r.usd)} · ${r.trades.toLocaleString()} trades</title></rect>`;
+  });
+  const first = new Date(rows[0].ts * 1000).toLocaleString('en-GB', { weekday:'short', hour:'2-digit', minute:'2-digit' });
+  const last = new Date(rows[rows.length-1].ts * 1000).toLocaleString('en-GB', { weekday:'short', hour:'2-digit', minute:'2-digit' });
+  out += `<text x="0" y="${H-2}" fill="var(--ink-faint)" style="font-size:9px;font-family:var(--mono)">${first}</text>`;
+  out += `<text x="${W}" y="${H-2}" text-anchor="end" fill="var(--ink-faint)" style="font-size:9px;font-family:var(--mono)">${last}</text>`;
+  svg.innerHTML = out;
+}
+
+function drawOiArea(rows) {
+  const svg = $('#oiChart');
+  if (!svg) return;
+  const W = 520, H = 120, padB = 16, padT = 6;
+  if (!rows || rows.length < 2) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:11px">not enough history yet</text>`;
+    return;
+  }
+  const xs = rows.map(r => new Date(r.day + 'T00:00:00Z').getTime());
+  const ys = rows.map(r => r.oi_usd);
+  const xMin = xs[0], xMax = xs[xs.length - 1];
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const yPad = (yMax - yMin || 1) * 0.1;
+  const sx = t => ((t - xMin) / ((xMax - xMin) || 1)) * W;
+  const sy = v => padT + (1 - (v - (yMin - yPad)) / ((yMax + yPad) - (yMin - yPad))) * (H - padT - padB);
+  const d = rows.map((r, i) => `${i === 0 ? 'M' : 'L'} ${sx(xs[i]).toFixed(1)} ${sy(ys[i]).toFixed(1)}`).join(' ');
+  const area = d + ` L ${W} ${H - padB} L 0 ${H - padB} Z`;
+  const firstLbl = new Date(xMin).toLocaleDateString('en-GB', { month:'short', day:'numeric' });
+  const lastLbl = new Date(xMax).toLocaleDateString('en-GB', { month:'short', day:'numeric' });
+  svg.innerHTML = `
+    <defs><linearGradient id="oiGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--accent)" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="var(--accent)" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${area}" fill="url(#oiGrad)"/>
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round"/>
+    <circle cx="${sx(xMax).toFixed(1)}" cy="${sy(ys[ys.length-1]).toFixed(1)}" r="3" fill="var(--accent)"/>
+    <text x="0" y="${H-3}" fill="var(--ink-faint)" style="font-size:9px;font-family:var(--mono)">${firstLbl}</text>
+    <text x="${W}" y="${H-3}" text-anchor="end" fill="var(--ink-faint)" style="font-size:9px;font-family:var(--mono)">${lastLbl}</text>
+  `;
+  // change since first recorded day
+  const chg = ys[0] ? ((ys[ys.length-1] - ys[0]) / ys[0]) * 100 : 0;
+  const cls = chg >= 0 ? 'up' : 'down';
+  $('#oiSub').innerHTML = `<span class="${cls}">${fmtPct(chg)}</span> since ${firstLbl} · all markets, USD`;
+}
+
+async function loadProtocolHistory() {
+  try {
+    const j = await apiGet('/api/protocol-history?days=90');
+    drawVolBars((j.vol_hourly || []).slice(-72));
+    drawOiArea(j.oi_daily || []);
+  } catch (e) { console.warn('protocol-history:', e); }
+}
+
 // ── main poll cycle ──────────────────────────────────────────
 async function pollOnce() {
   try {
@@ -659,6 +833,17 @@ $$('.controls .btn').forEach(b => {
   });
 });
 
+// LIT card timeframe chips
+$$('[data-lit-res]').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('[data-lit-res]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    litState.res = b.dataset.litRes;
+    litState.cnt = Number(b.dataset.litCnt);
+    loadLitChart();
+  });
+});
+
 // row click → open drawer
 $('#mktBody').addEventListener('click', e => {
   const tr = e.target.closest('tr[data-mid]');
@@ -698,5 +883,10 @@ $$('.drawer-tabs .btn-sm').forEach(b => {
 // ── boot ─────────────────────────────────────────────────────
 _syncTimeLabels();  // set "1H / 4H / 1D" labels for default candles mode
 setupChartHover();
+setupLitHover();
 pollOnce();
 schedule();
+loadLitChart();
+loadProtocolHistory();
+setInterval(loadLitChart, 60_000);
+setInterval(loadProtocolHistory, 300_000);

@@ -174,6 +174,39 @@ async def fetch_history(
     return [{"ts": r[0], "value": r[1]} for r in rows]
 
 
+async def fetch_protocol_history(days: int = 90) -> dict[str, Any]:
+    """Protocol-wide daily OI (each market's last snapshot per day, summed)
+    and hourly traded volume from the all_trades ledger."""
+    since_s = int(time.time()) - days * 86400
+    since_ms = (int(time.time()) - 8 * 86400) * 1000  # all_trades retention window
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """SELECT day, SUM(oi_usd) FROM (
+                   SELECT date(ts, 'unixepoch') AS day, oi_usd,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY date(ts, 'unixepoch'), market_id
+                              ORDER BY ts DESC
+                          ) AS rn
+                   FROM market_history
+                   WHERE ts >= ? AND oi_usd IS NOT NULL
+               ) WHERE rn = 1
+               GROUP BY day ORDER BY day ASC""",
+            (since_s,),
+        )
+        oi_rows = await cur.fetchall()
+        cur = await db.execute(
+            """SELECT (ts / 1000 / 3600) * 3600 AS hr, SUM(usd), COUNT(*)
+               FROM all_trades WHERE ts >= ?
+               GROUP BY hr ORDER BY hr ASC""",
+            (since_ms,),
+        )
+        vol_rows = await cur.fetchall()
+    return {
+        "oi_daily": [{"day": r[0], "oi_usd": r[1]} for r in oi_rows],
+        "vol_hourly": [{"ts": r[0], "usd": r[1], "trades": r[2]} for r in vol_rows],
+    }
+
+
 async def db_stats() -> dict[str, Any]:
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute("SELECT COUNT(*) FROM market_history")

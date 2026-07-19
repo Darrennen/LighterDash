@@ -6,7 +6,7 @@ import time
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.db import db_stats, fetch_history, init_db
+from app.db import db_stats, fetch_history, fetch_protocol_history, init_db
 from app.services.collector import collect_once
 from app.services.store import store
 
@@ -142,6 +142,24 @@ async def flow(limit: int = Query(500, ge=10, le=1000)):
         "sample_size": min(limit, len(store.trades)),
         "cvd": cvd[:10],
     }
+
+
+_proto_hist_cache: dict = {"ts": 0.0, "data": None, "days": 0}
+
+
+@router.get("/protocol-history")
+async def protocol_history(days: int = Query(90, ge=1, le=120)):
+    # heavier aggregate query — cache for 5 minutes
+    now = time.time()
+    if (
+        _proto_hist_cache["data"] is not None
+        and _proto_hist_cache["days"] == days
+        and now - _proto_hist_cache["ts"] < 300
+    ):
+        return _proto_hist_cache["data"]
+    data = await fetch_protocol_history(days)
+    _proto_hist_cache.update(ts=now, data=data, days=days)
+    return data
 
 
 @router.get("/candles/{market_id}")

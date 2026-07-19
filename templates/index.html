@@ -3,19 +3,27 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Lighter · Analyst Cockpit</title>
+<title>Lighter Cockpit · real-time Lighter.xyz analytics</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
 
 <header>
-  <div class="brand">
+  <a class="brand" href="/">
+    <span class="glyph"></span>
     <span class="mark">lighter</span>
-    <span class="sub">analyst cockpit</span>
-  </div>
+    <span class="sub">cockpit</span>
+  </a>
+  <nav style="display:flex;gap:6px">
+    <a href="/" class="nav-pill-hdr here">Overview</a>
+    <a href="/lit" class="nav-pill-hdr">LIT</a>
+    <a href="/explorer" class="nav-pill-hdr">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
+  </nav>
   <div class="controls">
     <span class="mode-label">REFRESH</span>
     <button class="btn active" data-refresh="5">5s</button>
@@ -23,35 +31,108 @@
     <button class="btn" data-refresh="60">60s</button>
     <button class="btn" data-refresh="0">pause</button>
   </div>
-  <a href="/lit" class="nav-pill-hdr">LIT tracker →</a>
-  <a href="/explorer" class="nav-pill-hdr">Explorer →</a>
-  <a href="/traders" class="nav-pill-hdr">Traders →</a>
   <div class="status">
     <span class="dot" id="statusDot"></span>
     <span id="statusText">connecting…</span>
-    <span style="color:var(--ink-faint);margin-left:12px">last sync <span id="lastSync">—</span></span>
+    <span style="color:var(--ink-faint);margin-left:12px">sync <span id="lastSync">—</span></span>
   </div>
   <div class="hdr-nav-mobile">
-    <a href="/lit" class="nav-pill-hdr">LIT tracker →</a>
-    <a href="/explorer" class="nav-pill-hdr">Explorer →</a>
-    <a href="/traders" class="nav-pill-hdr">Traders →</a>
+    <a href="/" class="nav-pill-hdr here">Overview</a>
+    <a href="/lit" class="nav-pill-hdr">LIT</a>
+    <a href="/explorer" class="nav-pill-hdr">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
   </div>
 </header>
 
-<section class="kpis">
-  <div class="kpi"><div class="lbl">24h Volume</div><div class="val" id="kpi-vol">—</div><div class="sub" id="kpi-vol-sub">&nbsp;</div></div>
-  <div class="kpi"><div class="lbl">Avg Funding</div><div class="val" id="kpi-funding">—</div><div class="sub" id="kpi-funding-sub">&nbsp;</div></div>
-  <div class="kpi"><div class="lbl">Active Markets</div><div class="val" id="kpi-mkts">—</div><div class="sub" id="kpi-mkts-sub">&nbsp;</div></div>
-  <div class="kpi"><div class="lbl">24h Trades</div><div class="val" id="kpi-trades">—</div><div class="sub" id="kpi-trades-sub">&nbsp;</div></div>
-  <div class="kpi"><div class="lbl">Top Gainer</div><div class="val" id="kpi-gainer" style="font-size:22px">—</div><div class="sub" id="kpi-gainer-sub">&nbsp;</div></div>
-  <div class="kpi"><div class="lbl">Top Loser</div><div class="val" id="kpi-loser" style="font-size:22px">—</div><div class="sub" id="kpi-loser-sub">&nbsp;</div></div>
-</section>
+<main class="bento">
 
-<section class="grid">
-  <div class="panel">
-    <h2>Markets <span class="count" id="mktCount"></span>
-      <input id="mktFilter" placeholder="filter symbol…" style="margin-left:auto;width:140px;padding:3px 8px;font-size:11px" />
-    </h2>
+  <!-- LIT price hero -->
+  <section class="card span-7">
+    <div class="card-head">
+      <span class="card-title">LIT · Lighter token</span>
+      <div class="tools">
+        <button class="btn-sm" data-lit-res="1h" data-lit-cnt="48">1H</button>
+        <button class="btn-sm" data-lit-res="4h" data-lit-cnt="42">4H</button>
+        <button class="btn-sm active" data-lit-res="1d" data-lit-cnt="60">1D</button>
+      </div>
+    </div>
+    <div class="hero-row">
+      <span class="hero-num glow" id="litPrice">—</span>
+      <span class="chg-chip" id="litChg" style="display:none"></span>
+    </div>
+    <div class="hero-sub" id="litSub">&nbsp;</div>
+    <div style="position:relative;margin-top:12px">
+      <svg id="litChart" viewBox="0 0 760 240" preserveAspectRatio="none" style="width:100%;height:240px;display:block"></svg>
+      <div id="litTip" class="chart-tip"></div>
+    </div>
+  </section>
+
+  <!-- protocol volume -->
+  <section class="card span-5">
+    <div class="card-head">
+      <span class="card-title">Protocol · 24h volume</span>
+      <span class="card-title count" style="margin-left:auto" id="volAsOf"></span>
+    </div>
+    <div class="hero-num" id="volHero">—</div>
+    <div class="stat-grid">
+      <div><div class="lbl">24h trades</div><div class="v" id="statTrades">—</div></div>
+      <div><div class="lbl">Active markets</div><div class="v" id="statMkts">—</div></div>
+      <div><div class="lbl">Avg funding</div><div class="v" id="statFunding">—</div></div>
+      <div><div class="lbl">Funding APR</div><div class="v" id="statApr">—</div></div>
+      <div><div class="lbl">Top gainer</div><div class="v" id="statGainer">—</div></div>
+      <div><div class="lbl">Top loser</div><div class="v" id="statLoser">—</div></div>
+    </div>
+    <div class="section-lbl" style="margin-top:auto;padding-top:10px">Hourly volume · last 3 days</div>
+    <svg id="volBars" viewBox="0 0 520 90" preserveAspectRatio="none" style="width:100%;height:90px;display:block"></svg>
+  </section>
+
+  <!-- open interest -->
+  <section class="card span-5">
+    <div class="card-head">
+      <span class="card-title">Open interest</span>
+      <span class="card-title count" style="margin-left:auto">daily · since May</span>
+    </div>
+    <div class="hero-num" id="oiHero">—</div>
+    <div class="hero-sub" id="oiSub">&nbsp;</div>
+    <svg id="oiChart" viewBox="0 0 520 120" preserveAspectRatio="none" style="width:100%;flex:1;min-height:120px;display:block;margin-top:12px"></svg>
+  </section>
+
+  <!-- liquidations -->
+  <section class="card span-3">
+    <div class="card-head"><span class="card-title">Liquidations</span></div>
+    <div class="hero-num" id="liqHero" style="color:var(--red)">—</div>
+    <div class="hero-sub" id="liqSub">last 500 trades sample</div>
+    <div id="liqFeed" style="margin-top:12px;display:flex;flex-direction:column;gap:6px;font-size:11px"></div>
+  </section>
+
+  <!-- movers -->
+  <section class="card span-4">
+    <div class="card-head"><span class="card-title">Movers · 24h</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div class="section-lbl up">▲ Gainers</div>
+        <table style="font-size:11px"><tbody id="gainersBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
+      </div>
+      <div>
+        <div class="section-lbl down">▼ Losers</div>
+        <table style="font-size:11px"><tbody id="losersBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="section-lbl">Volume leaders</div>
+      <table style="font-size:11px"><tbody id="volLeadBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <!-- markets table -->
+  <section class="card span-7">
+    <div class="card-head">
+      <span class="card-title">Markets <span class="count" id="mktCount"></span></span>
+      <div class="tools">
+        <input id="mktFilter" placeholder="filter symbol…" style="width:150px;padding:4px 10px;font-size:11px" />
+      </div>
+    </div>
     <div class="market-table">
       <table id="mktTable">
         <thead>
@@ -60,7 +141,6 @@
             <th data-k="last_price" class="num">Price</th>
             <th data-k="price_change" class="num">24h %</th>
             <th data-k="volume_24h" class="num sorted">Volume</th>
-
             <th data-k="funding" class="num">Funding</th>
             <th data-k="trades_24h" class="num">Trades</th>
             <th data-k="chart" class="num">Hist</th>
@@ -69,57 +149,49 @@
         <tbody id="mktBody"><tr><td colspan="7" class="empty">loading markets…</td></tr></tbody>
       </table>
     </div>
-  </div>
+  </section>
 
-  <div>
-    <div class="row">
-      <div class="panel">
-        <h2>Large Trades <span class="count" id="whaleCount"></span>
-          <select id="whaleThreshold" style="margin-left:auto;font-size:11px;padding:3px 8px">
-            <option value="10000">≥ $10k</option>
-            <option value="50000" selected>≥ $50k</option>
-            <option value="100000">≥ $100k</option>
-            <option value="250000">≥ $250k</option>
-            <option value="1000000">≥ $1M</option>
-          </select>
-        </h2>
-        <div style="max-height:320px;overflow:auto">
-          <table id="whaleTable">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Market</th>
-                <th>Side</th>
-                <th class="num">Price</th>
-                <th class="num">Size</th>
-                <th class="num">USD</th>
-              </tr>
-            </thead>
-            <tbody id="whaleBody"><tr><td colspan="6" class="empty">watching for large trades…</td></tr></tbody>
-          </table>
-        </div>
+  <!-- right column: large trades -->
+  <section class="card span-5">
+    <div class="card-head">
+      <span class="card-title">Large trades <span class="count" id="whaleCount"></span></span>
+      <div class="tools">
+        <select id="whaleThreshold" style="font-size:11px;padding:3px 8px">
+          <option value="10000" selected>≥ $10k</option>
+          <option value="50000">≥ $50k</option>
+          <option value="100000">≥ $100k</option>
+          <option value="250000">≥ $250k</option>
+          <option value="1000000">≥ $1M</option>
+        </select>
       </div>
     </div>
-
-    <div class="row">
-      <div class="panel">
-        <h2>Funding Heatmap <span class="count">hover for APR · click for history</span></h2>
-        <div class="heatmap" id="heatmap"><div class="empty" style="grid-column:1/-1">loading…</div></div>
-      </div>
+    <div style="max-height:620px;overflow:auto">
+      <table id="whaleTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Market</th>
+            <th>Side</th>
+            <th class="num">Price</th>
+            <th class="num">Size</th>
+            <th class="num">USD</th>
+          </tr>
+        </thead>
+        <tbody id="whaleBody"><tr><td colspan="6" class="empty">watching for large trades…</td></tr></tbody>
+      </table>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="row three">
-  <div class="panel">
-    <h2>Buy / Sell Flow <span class="count">last 500 trades</span></h2>
+  <!-- buy/sell flow -->
+  <section class="card span-5">
+    <div class="card-head"><span class="card-title">Buy / sell flow <span class="count">last 500 trades</span></span></div>
     <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:10px">
       <div>
-        <div class="flow-lbl">Buy Volume</div>
+        <div class="flow-lbl">Buy volume</div>
         <div class="up flow-val" id="buyVol">—</div>
       </div>
       <div>
-        <div class="flow-lbl">Sell Volume</div>
+        <div class="flow-lbl">Sell volume</div>
         <div class="down flow-val" id="sellVol">—</div>
       </div>
       <div style="margin-left:auto;text-align:right">
@@ -128,52 +200,23 @@
       </div>
     </div>
     <div class="flow-bar">
-      <div id="bar-buy" style="background:var(--green);width:50%"></div>
-      <div id="bar-sell" style="background:var(--red);width:50%"></div>
+      <div id="bar-buy" style="width:50%"></div>
+      <div id="bar-sell" style="width:50%"></div>
     </div>
     <div class="flow-pct"><span id="pctBuy">—</span><span id="pctSell">—</span></div>
-    <div style="margin-top:18px">
+    <div style="margin-top:16px">
       <div class="section-lbl">Top CVD — aggressor imbalance</div>
       <table style="font-size:11px"><tbody id="cvdBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
     </div>
-  </div>
+  </section>
 
-  <div class="panel">
-    <h2>Liquidations <span class="count" id="liqCount"></span></h2>
-    <div style="max-height:380px;overflow:auto">
-      <table id="liqTable">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Market</th>
-            <th>Side</th>
-            <th class="num">Price</th>
-            <th class="num">USD</th>
-          </tr>
-        </thead>
-        <tbody id="liqBody"><tr><td colspan="5" class="empty">no liquidations detected</td></tr></tbody>
-      </table>
-    </div>
-  </div>
+  <!-- funding heatmap -->
+  <section class="card span-7">
+    <div class="card-head"><span class="card-title">Funding heatmap <span class="count">hover for APR · click for history</span></span></div>
+    <div class="heatmap" id="heatmap"><div class="empty" style="grid-column:1/-1">loading…</div></div>
+  </section>
 
-  <div class="panel">
-    <h2>Movers <span class="count">24h</span></h2>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div>
-        <div class="section-lbl" style="color:var(--green)">▲ Gainers</div>
-        <table style="font-size:11px"><tbody id="gainersBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
-      </div>
-      <div>
-        <div class="section-lbl" style="color:var(--red)">▼ Losers</div>
-        <table style="font-size:11px"><tbody id="losersBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
-      </div>
-    </div>
-    <div style="margin-top:14px">
-      <div class="section-lbl">Volume Leaders</div>
-      <table style="font-size:11px"><tbody id="volLeadBody"><tr><td colspan="3" class="empty">—</td></tr></tbody></table>
-    </div>
-  </div>
-</section>
+</main>
 
 <!-- history drawer -->
 <div id="drawer" class="drawer">
