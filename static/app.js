@@ -259,6 +259,71 @@ function renderLiqs() {
     </tr>`).join('');
 }
 
+// ── chart hover: crosshair + tooltip ─────────────────────────
+let chartHover = null; // set by drawChart / drawCandleChart after each render
+
+function setupChartHover() {
+  const svg = $('#chart'), tip = $('#chartTip');
+  if (!svg || !tip) return;
+  const timeLbl = ms => new Date(ms).toLocaleString('en-GB', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+  const hide = () => {
+    tip.style.display = 'none';
+    const g = svg.querySelector('#hoverG');
+    if (g) g.style.display = 'none';
+  };
+  svg.addEventListener('mouseleave', hide);
+  svg.addEventListener('mousemove', e => {
+    const g = svg.querySelector('#hoverG');
+    if (!chartHover || !g) return hide();
+    const r = svg.getBoundingClientRect();
+    const mx = (e.clientX - r.left) * 800 / r.width;
+    let cx, html;
+    if (chartHover.type === 'line') {
+      const { points, X, Y, field } = chartHover;
+      let best = 0, bd = Infinity;
+      for (let i = 0; i < points.length; i++) {
+        const dist = Math.abs(X(points[i].ts) - mx);
+        if (dist < bd) { bd = dist; best = i; }
+      }
+      const p = points[best];
+      cx = X(p.ts);
+      const dot = svg.querySelector('#hoverDot');
+      dot.setAttribute('cx', cx.toFixed(1));
+      dot.setAttribute('cy', Y(p.value).toFixed(1));
+      const val = field === 'funding'
+        ? (p.value * 100).toFixed(4) + '% · ' + (p.value * 3 * 365 * 100).toFixed(1) + '% APR'
+        : fmtUsd(p.value);
+      html = `<div class="tt">${timeLbl(p.ts * 1000)}</div>${val}`;
+    } else {
+      const { data, pad, slotW } = chartHover;
+      const i = Math.min(data.length - 1, Math.max(0, Math.floor((mx - pad.l) / slotW)));
+      const c = data[i];
+      cx = pad.l + (i + 0.5) * slotW;
+      const ts = c.t > 1e12 ? c.t : c.t * 1000;
+      const cls = c.c >= c.o ? 'up' : 'down';
+      html = `<div class="tt">${timeLbl(ts)}</div>` +
+        `O ${fmtUsd(c.o)} · H <span class="up">${fmtUsd(c.h)}</span> · ` +
+        `L <span class="down">${fmtUsd(c.l)}</span> · C <span class="${cls}">${fmtUsd(c.c)}</span>`;
+    }
+    const line = svg.querySelector('#hoverX');
+    line.setAttribute('x1', cx.toFixed(1));
+    line.setAttribute('x2', cx.toFixed(1));
+    g.style.display = '';
+    tip.innerHTML = html;
+    tip.style.display = 'block';
+    const px = cx / 800 * r.width;
+    if (px > r.width * 0.55) {
+      tip.style.left = 'auto';
+      tip.style.right = (r.width - px + 12) + 'px';
+    } else {
+      tip.style.right = 'auto';
+      tip.style.left = (px + 12) + 'px';
+    }
+    const py = e.clientY - r.top;
+    tip.style.top = Math.max(4, Math.min(py - 14, r.height - 64)) + 'px';
+  });
+}
+
 // ── history drawer + SVG chart ──────────────────────────────
 async function openDrawer(marketId) {
   state.drawer.marketId = marketId;
@@ -335,6 +400,7 @@ function drawCandleChart(rawCandles) {
 
   svg.innerHTML = '';
   stats.innerHTML = '';
+  chartHover = null;
 
   if (!rawCandles.length) {
     svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:12px">no candle data available</text>`;
@@ -387,11 +453,8 @@ function drawCandleChart(rawCandles) {
     const bX = (parseFloat(cx) - bodyW / 2).toFixed(1);
     const wTop = sy(c.h).toFixed(1);
     const wBot = sy(c.l).toFixed(1);
-    const ts = c.t > 1e12 ? c.t : c.t * 1000;
-    const timeLbl = new Date(ts).toLocaleString('en-GB', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
     out += `<line x1="${cx}" x2="${cx}" y1="${wTop}" y2="${wBot}" stroke="${col}" stroke-width="1" opacity="0.6"/>`;
-    out += `<rect x="${bX}" y="${bTop}" width="${bodyW.toFixed(1)}" height="${bH}" fill="${col}" opacity="0.9">
-      <title>${timeLbl}  O:${fmtUsd(c.o)}  H:${fmtUsd(c.h)}  L:${fmtUsd(c.l)}  C:${fmtUsd(c.c)}</title></rect>`;
+    out += `<rect x="${bX}" y="${bTop}" width="${bodyW.toFixed(1)}" height="${bH}" fill="${col}" opacity="0.9"/>`;
   });
 
   // x-axis labels at ~4 points
@@ -404,7 +467,9 @@ function drawCandleChart(rawCandles) {
     out += `<text x="${x}" y="${H-8}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:10px;font-family:'JetBrains Mono',monospace">${lbl}</text>`;
   }
 
+  out += `<g id="hoverG" style="display:none"><line id="hoverX" y1="${pad.t}" y2="${H-pad.b}" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="2 3"/></g>`;
   svg.innerHTML = out;
+  chartHover = { type: 'candles', data, pad, slotW };
 
   // stats bar (last candle OHLC)
   const last = data[data.length - 1];
@@ -452,6 +517,7 @@ function drawChart(points, field) {
   if (!points.length) {
     svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--ink-faint)" style="font-size:12px">no history yet — let the collector run</text>`;
     stats.textContent = '';
+    chartHover = null;
     return;
   }
 
@@ -506,7 +572,12 @@ function drawChart(points, field) {
     <path d="${d}" fill="none" stroke="${lineColor}" stroke-width="1.5" stroke-linejoin="round"/>
     ${labels.join('')}
     ${xLabels.join('')}
+    <g id="hoverG" style="display:none">
+      <line id="hoverX" y1="${pad.t}" y2="${H - pad.b}" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="2 3"/>
+      <circle id="hoverDot" r="3.5" fill="${lineColor}" stroke="var(--bg)" stroke-width="1.5"/>
+    </g>
   `;
+  chartHover = { type: 'line', points, X: sx, Y: sy, field };
 
   // stats
   const last = ys[ys.length - 1];
@@ -626,5 +697,6 @@ $$('.drawer-tabs .btn-sm').forEach(b => {
 
 // ── boot ─────────────────────────────────────────────────────
 _syncTimeLabels();  // set "1H / 4H / 1D" labels for default candles mode
+setupChartHover();
 pollOnce();
 schedule();

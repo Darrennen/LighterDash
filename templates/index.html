@@ -196,7 +196,10 @@
     <button class="drawer-close" id="drawerClose">×</button>
   </div>
   <div class="drawer-body">
-    <svg id="chart" viewBox="0 0 800 260" preserveAspectRatio="none"></svg>
+    <div id="chartWrap">
+      <svg id="chart" viewBox="0 0 800 260" preserveAspectRatio="none"></svg>
+      <div id="chartTip" class="chart-tip"></div>
+    </div>
     <div id="chartStats" class="chart-stats"></div>
     <div id="drawerTradesWrap" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
       <div class="section-lbl" style="margin-bottom:8px">Recent Trades</div>
