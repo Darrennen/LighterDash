@@ -16,6 +16,8 @@ from app.db import (
     fetch_lit_leaders,
     fetch_lit_stats,
     fetch_lit_trades,
+    fetch_relative_performance,
+    fetch_volume_by_venue,
     init_db,
 )
 from app.services.collector import (
@@ -41,6 +43,14 @@ _TTL = 5.0
 _candles_cache: dict = {}
 _candles_cache_ts: dict = {}
 _CANDLES_TTL = 60.0
+
+_relperf_cache: dict = {}
+_relperf_cache_ts: dict = {}
+_RELPERF_TTL = 60.0
+
+_volvenue_cache: dict = {}
+_volvenue_cache_ts: dict = {}
+_VOLVENUE_TTL = 60.0
 
 # market_id sentinel: None = all LIT markets, 120 = perp, 2049 = spot
 _VALID_MARKETS = {120, 2049}
@@ -281,3 +291,27 @@ async def leaders(
     return await fetch_lit_leaders(
         hours=hours, top_n=top_n, market_id=_market_filter(market_id)
     )
+
+
+@router.get("/relative-performance")
+async def relative_performance(hours: int = Query(168, ge=1, le=8760)):
+    await _maybe_refresh()
+    now = time.time()
+    if hours in _relperf_cache and now - _relperf_cache_ts.get(hours, 0) < _RELPERF_TTL:
+        return _relperf_cache[hours]
+    result = await fetch_relative_performance(hours)
+    _relperf_cache[hours] = result
+    _relperf_cache_ts[hours] = now
+    return result
+
+
+@router.get("/volume-by-venue")
+async def volume_by_venue(hours: int = Query(24, ge=1, le=8760)):
+    await _maybe_refresh()
+    now = time.time()
+    if hours in _volvenue_cache and now - _volvenue_cache_ts.get(hours, 0) < _VOLVENUE_TTL:
+        return _volvenue_cache[hours]
+    result = await fetch_volume_by_venue(hours)
+    _volvenue_cache[hours] = result
+    _volvenue_cache_ts[hours] = now
+    return result

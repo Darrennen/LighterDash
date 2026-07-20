@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/static/styles.css?v=20260720a" />
+<link rel="stylesheet" href="/static/styles.css?v=20260720b" />
 <style>
   header{gap:12px !important;flex-wrap:wrap}
   .acct{font-size:11px;color:var(--ink-dim);font-variant-numeric:tabular-nums}
@@ -255,6 +255,43 @@
     </div>
   </section>
 
+  <!-- Relative Performance -->
+  <section class="card span-6">
+    <div class="card-head">
+      <span class="card-title">Relative Performance <span class="count">indexed to 100</span></span>
+      <div class="tools">
+        <button class="btn-sm" data-rp-hours="24">24h</button>
+        <button class="btn-sm active" data-rp-hours="168">7d</button>
+        <button class="btn-sm" data-rp-hours="720">30d</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;font-size:10px;margin-bottom:6px">
+      <span style="color:var(--accent)">● LIT</span>
+      <span style="color:var(--amber)">● BTC</span>
+      <span style="color:var(--ink-dim)">● ETH</span>
+    </div>
+    <div id="relPerfChart" style="width:100%;height:200px;position:relative">
+      <div style="color:var(--ink-faint);font-size:11px;padding:12px 0">loading…</div>
+    </div>
+  </section>
+
+  <!-- Volume by Venue -->
+  <section class="card span-6">
+    <div class="card-head">
+      <span class="card-title">Volume by Venue <span class="count">perp vs spot</span></span>
+      <div class="tools">
+        <button class="btn-sm active" data-vv-hours="24">24h</button>
+        <button class="btn-sm" data-vv-hours="168">7d</button>
+        <button class="btn-sm" data-vv-hours="720">30d</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;font-size:10px;margin-bottom:6px">
+      <span style="color:var(--accent)">● Perp #120</span>
+      <span style="color:var(--amber)">● Spot #2049</span>
+    </div>
+    <div id="volVenueChart" style="width:100%;height:160px"></div>
+  </section>
+
   <!-- TWAP / Pressure alerts -->
   <section class="card span-12">
     <div class="card-head">
@@ -354,6 +391,6 @@
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/lit.js?v=20260720a"></script>
+<script type="module" src="/static/lit.js?v=20260720b"></script>
 </body>
 </html>

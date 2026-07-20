@@ -930,12 +930,228 @@ document.querySelectorAll('[data-res]').forEach(b => {
   });
 });
 
+// ── Relative Performance (LIT vs BTC vs ETH, indexed to 100) ──
+
+let _rpHours = 168;
+let _rpData = null;
+
+async function pollRelPerf() {
+  try {
+    const data = await apiGet(`/api/lit/relative-performance?hours=${_rpHours}`);
+    _rpData = data;
+    drawRelPerf(data);
+  } catch (e) {
+    console.warn('relative-performance fetch failed:', e.message);
+  }
+}
+
+function drawRelPerf(data) {
+  const el = document.getElementById('relPerfChart');
+  if (!el) return;
+
+  if (!data || !data.series || !data.series.LIT || !data.series.LIT.length) {
+    el.innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:12px 0">not enough history yet</div>';
+    state._rpHover = null;
+    return;
+  }
+
+  const W = 800, H = 200;
+  const pad = { l: 4, r: 52, t: 8, b: 4 };
+  const chartW = W - pad.l - pad.r;
+  const chartH = H - pad.t - pad.b;
+
+  const lit = data.series.LIT, btc = data.series.BTC, eth = data.series.ETH;
+  const n = lit.length;
+  const allVals = [...lit, ...btc, ...eth].map(p => p.value);
+  const minV = Math.min(...allVals);
+  const maxV = Math.max(...allVals);
+  const range = (maxV - minV) || 1;
+
+  const py = v => pad.t + ((maxV - v) / range * chartH);
+  const px = i => pad.l + (n > 1 ? (i / (n - 1)) * chartW : chartW / 2);
+
+  const y100 = py(100);
+  const baseline = `<line x1="${pad.l}" y1="${y100.toFixed(1)}" x2="${W - pad.r}" y2="${y100.toFixed(1)}" stroke="var(--line-2)" stroke-width="1" stroke-dasharray="3,3"/>`;
+
+  const axisLines = [0, 1, 2, 3, 4].map(k => {
+    const v = minV + range * (k / 4);
+    const y = py(v);
+    return `<line x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1"/>
+      <text x="${W - pad.r + 4}" y="${(y + 3).toFixed(1)}" fill="var(--ink-faint)" font-size="9" font-family="monospace">${v.toFixed(0)}</text>`;
+  }).join('');
+
+  const mkLine = (series, color) => {
+    const pts = series.map((p, i) => `${px(i).toFixed(1)},${py(p.value).toFixed(1)}`).join(' ');
+    return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"/>`;
+  };
+
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block;overflow:visible">
+    ${axisLines}${baseline}
+    ${mkLine(lit, 'var(--accent)')}
+    ${mkLine(btc, 'var(--amber)')}
+    ${mkLine(eth, 'var(--ink-dim)')}
+    <g id="rpHoverG" style="display:none">
+      <line id="rpHoverX" x1="0" y1="${pad.t}" x2="0" y2="${pad.t + chartH}" stroke="var(--line-2)" stroke-width="1"/>
+      <circle id="rpDotLIT" r="3" fill="var(--accent)"/>
+      <circle id="rpDotBTC" r="3" fill="var(--amber)"/>
+      <circle id="rpDotETH" r="3" fill="var(--ink-dim)"/>
+    </g>
+  </svg><div id="relPerfTip" class="chart-tip"></div>`;
+
+  state._rpHover = { series: data.series, px, py, n };
+}
+
+function setupRelPerfHover() {
+  const container = document.getElementById('relPerfChart');
+  if (!container) return;
+
+  const hide = () => {
+    const g = container.querySelector('#rpHoverG');
+    const tip = container.querySelector('#relPerfTip');
+    if (g) g.style.display = 'none';
+    if (tip) tip.style.display = 'none';
+  };
+  container.addEventListener('mouseleave', hide);
+  container.addEventListener('mousemove', e => {
+    const svg = container.querySelector('svg');
+    const g = container.querySelector('#rpHoverG');
+    const tip = container.querySelector('#relPerfTip');
+    const hov = state._rpHover;
+    if (!svg || !g || !tip || !hov) return hide();
+
+    const r = svg.getBoundingClientRect();
+    const mx = (e.clientX - r.left) * 800 / r.width;
+    const { series, px, py, n } = hov;
+
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(px(i) - mx);
+      if (d < bd) { bd = d; best = i; }
+    }
+    const i = best;
+    const litP = series.LIT[i], btcP = series.BTC[i], ethP = series.ETH[i];
+    const cx = px(i);
+
+    const lineX = container.querySelector('#rpHoverX');
+    lineX.setAttribute('x1', cx.toFixed(1));
+    lineX.setAttribute('x2', cx.toFixed(1));
+    const dotLit = container.querySelector('#rpDotLIT');
+    dotLit.setAttribute('cx', cx.toFixed(1));
+    dotLit.setAttribute('cy', py(litP.value).toFixed(1));
+    const dotBtc = container.querySelector('#rpDotBTC');
+    dotBtc.setAttribute('cx', cx.toFixed(1));
+    dotBtc.setAttribute('cy', py(btcP.value).toFixed(1));
+    const dotEth = container.querySelector('#rpDotETH');
+    dotEth.setAttribute('cx', cx.toFixed(1));
+    dotEth.setAttribute('cy', py(ethP.value).toFixed(1));
+    g.style.display = '';
+
+    tip.innerHTML = `<div class="tt">${fmtMYT(litP.ts)}</div>` +
+      `<div><span style="color:var(--accent)">● LIT</span> ${litP.value.toFixed(2)}</div>` +
+      `<div><span style="color:var(--amber)">● BTC</span> ${btcP.value.toFixed(2)}</div>` +
+      `<div><span style="color:var(--ink-dim)">● ETH</span> ${ethP.value.toFixed(2)}</div>`;
+    tip.style.display = 'block';
+
+    const cxPixels = cx / 800 * r.width;
+    if (cxPixels > r.width * 0.55) {
+      tip.style.left = 'auto';
+      tip.style.right = (r.width - cxPixels + 12) + 'px';
+    } else {
+      tip.style.right = 'auto';
+      tip.style.left = (cxPixels + 12) + 'px';
+    }
+    const my = e.clientY - r.top;
+    tip.style.top = Math.max(4, Math.min(my - 14, r.height - 64)) + 'px';
+  });
+}
+
+document.querySelectorAll('[data-rp-hours]').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('[data-rp-hours]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    _rpHours = Number(b.dataset.rpHours);
+    pollRelPerf();
+  });
+});
+
+// ── Volume by Venue (perp vs spot, stacked bars) ──────────────
+
+let _vvHours = 24;
+let _vvData = null;
+
+async function pollVolVenue() {
+  try {
+    const data = await apiGet(`/api/lit/volume-by-venue?hours=${_vvHours}`);
+    _vvData = data;
+    drawVolVenue(data);
+  } catch (e) {
+    console.warn('volume-by-venue fetch failed:', e.message);
+  }
+}
+
+function drawVolVenue(data) {
+  const el = document.getElementById('volVenueChart');
+  if (!el) return;
+
+  const buckets = (data && data.buckets) || [];
+  if (!buckets.length) {
+    el.innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:12px 0">volume ledger warming up</div>';
+    return;
+  }
+
+  const W = 800, H = 160, padB = 16;
+  const chartH = H - padB;
+  const n = buckets.length;
+  const max = Math.max(...buckets.map(b => b.perp + b.spot), 1);
+  const slot = W / n;
+  const bw = Math.max(2, slot * 0.62);
+
+  const fmtLabel = ts => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+
+  const bars = buckets.map((b, i) => {
+    const x = i * slot + (slot - bw) / 2;
+    const perpH = (b.perp / max) * chartH;
+    const spotH = (b.spot / max) * chartH;
+    const perpY = chartH - perpH;
+    const spotY = perpY - spotH;
+    const title = `${fmtLabel(b.ts)} — perp ${fmtUsd(b.perp)} · spot ${fmtUsd(b.spot)}`;
+    return `<g>
+      <rect x="${x.toFixed(1)}" y="${perpY.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, perpH).toFixed(1)}" fill="var(--accent)" opacity="0.85"><title>${title}</title></rect>
+      <rect x="${x.toFixed(1)}" y="${spotY.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, spotH).toFixed(1)}" fill="var(--amber)" opacity="0.85"><title>${title}</title></rect>
+    </g>`;
+  }).join('');
+
+  const first = buckets[0], last = buckets[n - 1];
+
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block">
+    ${bars}
+    <text x="4" y="${H - 4}" fill="var(--ink-faint)" font-size="9" font-family="monospace">${fmtLabel(first.ts)}</text>
+    <text x="${W - 4}" y="${H - 4}" text-anchor="end" fill="var(--ink-faint)" font-size="9" font-family="monospace">${fmtLabel(last.ts)}</text>
+  </svg>`;
+}
+
+document.querySelectorAll('[data-vv-hours]').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('[data-vv-hours]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    _vvHours = Number(b.dataset.vvHours);
+    pollVolVenue();
+  });
+});
+
 // ── boot ──────────────────────────────────────────────────────
 pollOnce();
 schedule();
 pollBackfillStatus();
 pollCandles();
 refreshTracked();
+setupRelPerfHover();
+pollRelPerf();
+pollVolVenue();
 setInterval(pollCandles, 60_000);
 setInterval(pollBackfillStatus, 15_000);
 setInterval(refreshTracked, 120_000); // tracked wallets refresh every 2 min
+setInterval(pollRelPerf, 60_000);
+setInterval(pollVolVenue, 60_000);

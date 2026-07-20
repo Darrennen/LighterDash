@@ -525,6 +525,66 @@ async def fetch_lit_candles_db(
     ]
 
 
+async def fetch_relative_performance(hours: int) -> dict[str, Any]:
+    """LIT (120) vs BTC (1) vs ETH (0) indexed to 100 at the first aligned snapshot."""
+    since = int(time.time()) - hours * 3600
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """SELECT l.ts, l.last_price, b.last_price, e.last_price
+               FROM market_history l
+               JOIN market_history b ON b.ts = l.ts AND b.market_id = 1
+               JOIN market_history e ON e.ts = l.ts AND e.market_id = 0
+               WHERE l.market_id = 120 AND l.ts >= ?
+                 AND l.last_price IS NOT NULL
+                 AND b.last_price IS NOT NULL
+                 AND e.last_price IS NOT NULL
+               ORDER BY l.ts ASC""",
+            (since,),
+        )
+        rows = await cur.fetchall()
+
+    if not rows:
+        return {"hours": hours, "base_ts": None, "series": {"LIT": [], "BTC": [], "ETH": []}}
+
+    lit0, btc0, eth0 = rows[0][1], rows[0][2], rows[0][3]
+    return {
+        "hours": hours,
+        "base_ts": rows[0][0],
+        "series": {
+            "LIT": [{"ts": r[0], "value": round(r[1] / lit0 * 100, 4)} for r in rows],
+            "BTC": [{"ts": r[0], "value": round(r[2] / btc0 * 100, 4)} for r in rows],
+            "ETH": [{"ts": r[0], "value": round(r[3] / eth0 * 100, 4)} for r in rows],
+        },
+    }
+
+
+async def fetch_volume_by_venue(hours: int) -> dict[str, Any]:
+    """LIT trade volume bucketed by hour (<=168h) or day (>168h), perp vs spot."""
+    bucket_ms = 3_600_000 if hours <= 168 else 86_400_000
+    since_ms = int((time.time() - hours * 3600) * 1000)
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """SELECT (ts / ?) * ? AS bucket,
+                      SUM(CASE WHEN market_id = 120  THEN usd ELSE 0 END) AS perp,
+                      SUM(CASE WHEN market_id = 2049 THEN usd ELSE 0 END) AS spot
+               FROM lit_trades
+               WHERE ts >= ?
+               GROUP BY bucket
+               ORDER BY bucket ASC""",
+            (bucket_ms, bucket_ms, since_ms),
+        )
+        rows = await cur.fetchall()
+
+    return {
+        "hours": hours,
+        "bucket": "hour" if hours <= 168 else "day",
+        "buckets": [
+            {"ts": int(r[0]) // 1000, "perp": r[1] or 0.0, "spot": r[2] or 0.0}
+            for r in rows
+        ],
+    }
+
+
 async def fetch_lit_stats() -> dict[str, Any]:
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute("SELECT COUNT(*), MIN(ts), MAX(ts) FROM lit_trades")
