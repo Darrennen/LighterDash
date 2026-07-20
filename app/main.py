@@ -17,7 +17,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.db import init_db
-from app.routes import api, explorer as explorer_routes, lit as lit_routes, traders as traders_routes
+from app.routes import (
+    api,
+    explorer as explorer_routes,
+    holders as holders_routes,
+    lit as lit_routes,
+    traders as traders_routes,
+)
 from app.services import traders_service
 
 log = logging.getLogger("lighter")
@@ -65,6 +71,7 @@ app.include_router(api.router, prefix="/api", tags=["data"])
 app.include_router(lit_routes.router, prefix="/api/lit", tags=["lit"])
 app.include_router(explorer_routes.router, prefix="/api/explorer", tags=["explorer"])
 app.include_router(traders_routes.router, prefix="/api/traders", tags=["traders"])
+app.include_router(holders_routes.router, prefix="/api/holders", tags=["holders"])
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
@@ -96,6 +103,11 @@ async def traders_page():
 @app.get("/watch", include_in_schema=False)
 async def watch_page():
     return FileResponse(ROOT / "templates" / "watch.html")
+
+
+@app.get("/holders", include_in_schema=False)
+async def holders_page():
+    return FileResponse(ROOT / "templates" / "holders.html")
 
 
 @app.get("/health", tags=["meta"])

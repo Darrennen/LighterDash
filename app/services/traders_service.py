@@ -10,6 +10,9 @@ import time
 from datetime import datetime
 from typing import Any
 
+import aiosqlite
+
+from app.config import settings
 from app.db import (
     fetch_account_snapshots,
     fetch_all_trades_status,
@@ -308,6 +311,116 @@ async def get_positions(sort: str = "notional", limit: int = 50) -> dict[str, An
         "updated_at": int(time.time()),
         "accounts_scanned": len(rows),
         "positions": all_positions[:limit],
+    }
+
+
+# ── /holders ─────────────────────────────────────────────────────────
+
+_HOLDER_TIERS = [
+    ("mega", "Mega Whale", 1_000_000, None),
+    ("whale", "Whale", 100_000, 1_000_000),
+    ("dolphin", "Dolphin", 10_000, 100_000),
+    ("fish", "Fish", 1_000, 10_000),
+    ("shrimp", "Shrimp", 1, 1_000),
+]
+
+
+def _holder_tier(bal: float) -> str:
+    if bal >= 1_000_000:
+        return "mega"
+    if bal >= 100_000:
+        return "whale"
+    if bal >= 10_000:
+        return "dolphin"
+    if bal >= 1_000:
+        return "fish"
+    return "shrimp"
+
+
+async def get_holders(limit: int = 100) -> dict[str, Any]:
+    rows = await fetch_account_snapshots(limit=500)
+    accounts_scanned = len(rows)
+
+    lit_price = _market_meta.get(120, {}).get("last_price") or None
+    if not lit_price:
+        async with aiosqlite.connect(settings.DB_PATH) as db:
+            cur = await db.execute(
+                "SELECT last_price FROM market_history WHERE market_id=120 "
+                "ORDER BY ts DESC LIMIT 1"
+            )
+            price_row = await cur.fetchone()
+        lit_price = price_row[0] if price_row else None
+
+    holders: list[dict[str, Any]] = []
+    nonzero_count = 0
+
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        bal = None
+        for a in payload.get("assets") or []:
+            if a.get("symbol") == "LIT":
+                bal = _num(a.get("balance"))
+                break
+        if bal is None or bal <= 0:
+            continue
+        nonzero_count += 1
+        if bal < 1:
+            continue
+        holders.append({
+            "account_index": row["account_index"],
+            "l1_address": row["l1_address"],
+            "balance_lit": bal,
+        })
+
+    tracked_lit_total = sum(h["balance_lit"] for h in holders)
+    for h in holders:
+        h["usd"] = h["balance_lit"] * lit_price if lit_price else None
+        h["share_pct"] = (
+            h["balance_lit"] / tracked_lit_total * 100 if tracked_lit_total else 0.0
+        )
+        h["tier"] = _holder_tier(h["balance_lit"])
+
+    holders.sort(key=lambda h: h["balance_lit"], reverse=True)
+
+    tier_breakdown = []
+    for key, label, mn, mx in _HOLDER_TIERS:
+        members = [h for h in holders if h["tier"] == key]
+        lit_sum = sum(h["balance_lit"] for h in members)
+        tier_breakdown.append({
+            "key": key,
+            "label": label,
+            "min": mn,
+            "max": mx,
+            "count": len(members),
+            "lit_sum": lit_sum,
+            "share_pct": lit_sum / tracked_lit_total * 100 if tracked_lit_total else 0.0,
+        })
+
+    retail_count = sum(1 for h in holders if h["balance_lit"] >= 100)
+    whale_count = sum(1 for h in holders if h["balance_lit"] >= 10_000)
+    mega_count = sum(1 for h in holders if h["balance_lit"] >= 1_000_000)
+    whale_lit = sum(h["balance_lit"] for h in holders if h["balance_lit"] >= 10_000)
+    whale_share_pct = whale_lit / tracked_lit_total * 100 if tracked_lit_total else 0.0
+
+    return {
+        "updated_at": int(time.time()),
+        "accounts_scanned": accounts_scanned,
+        "nonzero_count": nonzero_count,
+        "holders_count": len(holders),
+        "lit_price": lit_price,
+        "tracked_lit_total": tracked_lit_total,
+        "tracked_usd_total": tracked_lit_total * lit_price if lit_price else None,
+        "stats": {
+            "retail_count": retail_count,
+            "whale_count": whale_count,
+            "mega_count": mega_count,
+            "whale_share_pct": whale_share_pct,
+        },
+        "tier_breakdown": tier_breakdown,
+        "holders": holders[:limit],
     }
 
 
