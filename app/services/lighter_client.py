@@ -33,7 +33,11 @@ class LighterClient:
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
         self._explorer: httpx.AsyncClient | None = None
-        self._blocked_until: float = 0.0
+        # Per-path cooldowns — Lighter rate-limits endpoints independently
+        # (observed: recentTrades gets hit hard while /account stays fine at
+        # the same moment), so a single shared timestamp across all paths
+        # would let one hot endpoint's cooldown block an unrelated healthy one.
+        self._blocked_until: dict[str, float] = {}
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -61,15 +65,15 @@ class LighterClient:
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict:
         now = time.time()
-        if now < self._blocked_until:
-            raise UpstreamUnavailable("Lighter API cooling down after rate limit")
+        if now < self._blocked_until.get(path, 0.0):
+            raise UpstreamUnavailable(f"Lighter API ({path}) cooling down after rate limit")
         client = await self._get_client()
         try:
             r = await client.get(path, params=params)
             r.raise_for_status()
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (429, 405, 403):
-                self._blocked_until = time.time() + _COOLDOWN_SECS
+                self._blocked_until[path] = time.time() + _COOLDOWN_SECS
                 raise UpstreamUnavailable(f"Lighter API returned {e.response.status_code}") from e
             raise
         return r.json()
