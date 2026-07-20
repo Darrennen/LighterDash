@@ -150,7 +150,7 @@ function drawPyramid(d) {
     const y = i * (rowH + gap);
     const w = Math.max(2, (t.count / max) * barMaxW);
     const c = TIER_COLOR[t.key] || { bg: 'var(--accent)', fg: 'var(--accent)' };
-    const title = `${t.label}: ${fmtNum(t.count)} holders · ${fmtLit(t.lit_sum)} LIT`;
+    const title = `${t.label}: ${fmtNum(t.count)} holder${t.count === 1 ? '' : 's'} · ${fmtLit(t.lit_sum)} LIT`;
     return `<g>
       <text x="0" y="${(y + rowH / 2 + 4).toFixed(1)}" fill="var(--ink-dim)" font-size="11" font-family="monospace">${t.label}</text>
       <rect x="${labelW}" y="${y}" width="${barMaxW}" height="${rowH}" fill="var(--line)" opacity="0.35"><title>${title}</title></rect>
