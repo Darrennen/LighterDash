@@ -28,6 +28,7 @@ from app.services.lighter_client import client
 from app.services.store import store
 
 LIT_MARKET_IDS = (120, 2049)  # LIT perp + LIT/USDC spot
+_TRADES_FETCH_CONCURRENCY = 5  # cap concurrent recentTrades calls per tick
 
 log = logging.getLogger("lighter.collector")
 
@@ -136,12 +137,20 @@ async def collect_once() -> dict[str, Any]:
     markets = _normalise_markets(details, fundings)
     store.set_markets(markets)
 
-    # Top N by volume → pull trades concurrently
+    # Top N by volume → pull trades with capped concurrency (a flat gather of
+    # TOP_N_MARKETS requests fires them all in the same instant, which is the
+    # kind of burst that trips Lighter's rate limiter/WAF in the first place).
     top = sorted(markets, key=lambda m: m["volume_24h"], reverse=True)[
         : settings.TOP_N_MARKETS
     ]
+    sem = asyncio.Semaphore(_TRADES_FETCH_CONCURRENCY)
+
+    async def _fetch(m: dict[str, Any]) -> list[dict]:
+        async with sem:
+            return await client.recent_trades(m["market_id"], settings.RECENT_TRADES_LIMIT)
+
     trade_results = await asyncio.gather(
-        *(client.recent_trades(m["market_id"], settings.RECENT_TRADES_LIMIT) for m in top),
+        *(_fetch(m) for m in top),
         return_exceptions=True,
     )
 

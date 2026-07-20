@@ -5,6 +5,7 @@ All payload-shape defences live here so the rest of the app can assume a stable 
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -16,6 +17,12 @@ log = logging.getLogger("lighter.client")
 
 EXPLORER_API = "https://explorer.elliot.ai/api"
 
+# Once Lighter returns 429/405/403, back off ALL further calls (background
+# collectors and interactive lookups alike) for this long before retrying —
+# a shared circuit breaker so a rate-limit hit stops the whole app from
+# continuing to hammer the same wall on every poll cycle.
+_COOLDOWN_SECS = 30
+
 
 class UpstreamUnavailable(Exception):
     """Raised when Lighter's own API rate-limits or WAF-blocks a request —
@@ -26,6 +33,7 @@ class LighterClient:
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
         self._explorer: httpx.AsyncClient | None = None
+        self._blocked_until: float = 0.0
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -52,16 +60,21 @@ class LighterClient:
             await self._explorer.aclose()
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict:
+        now = time.time()
+        if now < self._blocked_until:
+            raise UpstreamUnavailable("Lighter API cooling down after rate limit")
         client = await self._get_client()
-        r = await client.get(path, params=params)
-        r.raise_for_status()
+        try:
+            r = await client.get(path, params=params)
+            r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (429, 405, 403):
+                self._blocked_until = time.time() + _COOLDOWN_SECS
+                raise UpstreamUnavailable(f"Lighter API returned {e.response.status_code}") from e
+            raise
         return r.json()
 
     # ─── normalised endpoints ──────────────────────────────────────────
-    async def order_books(self) -> list[dict]:
-        j = await self._get("/orderBooks")
-        return j.get("order_books") or j.get("orderBooks") or j.get("data") or []
-
     async def order_book_details(self) -> list[dict]:
         """Richer snapshot: includes open_interest, daily_price_high/low, etc."""
         j = await self._get("/orderBookDetails")
@@ -69,19 +82,10 @@ class LighterClient:
         spot  = j.get("spot_order_book_details") or []
         return perps + spot
 
-    async def exchange_stats(self) -> list[dict]:
-        j = await self._get("/exchangeStats")
-        return (
-            j.get("order_book_stats")
-            or j.get("exchange_stats")
-            or j.get("data")
-            or []
-        )
-
     async def funding_rates(self) -> list[dict]:
         try:
             j = await self._get("/funding-rates")
-        except httpx.HTTPError:
+        except (httpx.HTTPError, UpstreamUnavailable):
             return []
         return j.get("funding_rates") or j.get("fundingRates") or j.get("data") or []
 
@@ -90,7 +94,7 @@ class LighterClient:
             j = await self._get(
                 "/recentTrades", params={"market_id": market_id, "limit": limit}
             )
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, UpstreamUnavailable) as e:
             log.debug("recentTrades(%s) failed: %s", market_id, e)
             return []
         return j.get("trades") or j.get("recent_trades") or j.get("data") or []
@@ -112,13 +116,10 @@ class LighterClient:
             return []
 
     async def account(self, by: str = "index", value: str = "") -> dict:
+        # Note: UpstreamUnavailable (rate-limit/WAF) is deliberately NOT caught
+        # here — callers need to distinguish it from a genuine empty result.
         try:
             j = await self._get("/account", params={"by": by, "value": value})
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code in (429, 405, 403):
-                raise UpstreamUnavailable(f"Lighter API returned {e.response.status_code}") from e
-            log.debug("account(%s=%s) failed: %s", by, value, e)
-            return {}
         except httpx.HTTPError as e:
             log.debug("account(%s=%s) failed: %s", by, value, e)
             return {}
@@ -129,17 +130,16 @@ class LighterClient:
         """All sub-accounts registered under an L1 wallet address (public, no auth)."""
         try:
             return await self._get("/accountsByL1Address", params={"l1_address": address})
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, UpstreamUnavailable) as e:
             log.debug("accounts_by_l1(%s) failed: %s", address, e)
             return {}
 
     async def candles(
         self, market_id: int, resolution: str = "1h", count: int = 24
     ) -> list[dict]:
-        import time as _time
         res_secs = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
         bucket = res_secs.get(resolution, 3600)
-        end_ms   = int(_time.time() * 1000)
+        end_ms   = int(time.time() * 1000)
         start_ms = end_ms - bucket * count * 1000
         try:
             j = await self._get(
@@ -152,7 +152,7 @@ class LighterClient:
                     "count_back": count,
                 },
             )
-        except httpx.HTTPError:
+        except (httpx.HTTPError, UpstreamUnavailable):
             return []
         raw = j.get("c") or j.get("candlesticks") or j.get("candles") or j.get("data") or []
         return raw
