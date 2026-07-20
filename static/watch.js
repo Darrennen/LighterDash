@@ -53,7 +53,7 @@ $('#watchBtn').addEventListener('click', () => {
 $('#watchInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#watchBtn').click(); });
 
 if (!urlQ) {
-  $('#promptSection').style.display = '';
+  $('#promptSection').style.display = 'flex';
 } else {
   state.query = urlQ;
   $('#explorerLink').href = `/explorer?q=${encodeURIComponent(urlQ)}`;

@@ -6,6 +6,7 @@ import re
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.services import traders_service
+from app.services.lighter_client import UpstreamUnavailable
 from app.services.ratelimit import traders_pnl_limiter
 
 router = APIRouter()
@@ -49,7 +50,13 @@ async def positions(
 @router.get("/profile")
 async def profile(query: str = Query(..., description="Account # or 0x wallet address")):
     query = _validate_query(query)
-    data = await traders_service.get_profile(query)
+    try:
+        data = await traders_service.get_profile(query)
+    except UpstreamUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Lighter's account API is rate-limited right now — wait a minute and try again",
+        )
     if data is None:
         raise HTTPException(status_code=404, detail="account not found")
     return data
@@ -66,7 +73,13 @@ async def pnl(
     client_ip = request.client.host if request.client else "unknown"
     if not traders_pnl_limiter.is_allowed(client_ip):
         raise HTTPException(status_code=429, detail="Too many requests — please slow down")
-    data = await traders_service.get_pnl(query, max_pages=max_pages, refresh=bool(refresh))
+    try:
+        data = await traders_service.get_pnl(query, max_pages=max_pages, refresh=bool(refresh))
+    except UpstreamUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Lighter's account API is rate-limited right now — wait a minute and try again",
+        )
     if data is None:
         raise HTTPException(status_code=404, detail="account not found")
     return data

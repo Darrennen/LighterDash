@@ -5,7 +5,7 @@ import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.services.lighter_client import client
+from app.services.lighter_client import client, UpstreamUnavailable
 from app.services.ratelimit import explorer_limiter
 
 _ETH_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -103,7 +103,13 @@ async def account_lookup(
             raise HTTPException(status_code=400, detail="Account index must be a number")
         by = "index"
 
-    data = await client.account(by=by, value=query)
+    try:
+        data = await client.account(by=by, value=query)
+    except UpstreamUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Lighter's account API is rate-limited right now — wait a minute and try again",
+        )
 
     if not data:
         raise HTTPException(status_code=404, detail="account not found")

@@ -4,47 +4,51 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>LIT · Analyst Cockpit</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='8' y='8' width='16' height='16' rx='3' transform='rotate(45 16 16)' fill='%236fb9ff'/></svg>" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/static/styles.css?v=20260719a" />
+<link rel="stylesheet" href="/static/styles.css?v=20260720a" />
 <style>
-  header{gap:14px !important}
+  header{gap:12px !important;flex-wrap:wrap}
   .acct{font-size:11px;color:var(--ink-dim);font-variant-numeric:tabular-nums}
   .rank{color:var(--ink-faint);font-size:11px;width:24px}
-  .leaders-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
-  .leaders-grid>*{background:var(--bg)}
+  .leaders-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media(max-width:900px){.leaders-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 
 <header>
-  <div class="brand">
-    <a href="/" class="mark" style="text-decoration:none">lighter</a>
-    <span class="sub">LIT · flow tracker</span>
-  </div>
-  <div class="controls">
-    <span class="mode-label">MARKET</span>
+  <a class="brand" href="/">
+    <span class="glyph"></span>
+    <span class="mark">lighter</span>
+    <span class="sub">cockpit</span>
+  </a>
+  <nav style="display:flex;gap:6px">
+    <a href="/" class="nav-pill-hdr">Overview</a>
+    <a href="/lit" class="nav-pill-hdr here">LIT</a>
+    <a href="/explorer" class="nav-pill-hdr">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
+  </nav>
+  <div class="controls" data-hide-mobile>
     <button class="btn active" data-market="">ALL</button>
     <button class="btn" data-market="120">PERP</button>
     <button class="btn" data-market="2049">SPOT</button>
   </div>
-  <div class="controls" style="margin-left:0">
-    <span class="mode-label">PERIOD</span>
+  <div class="controls" data-hide-mobile>
     <button class="btn active" data-hours="24">24h</button>
     <button class="btn" data-hours="168">7d</button>
     <button class="btn" data-hours="720">30d</button>
-    <button class="btn" data-hours="0">ALL TIME</button>
+    <button class="btn" data-hours="0">all</button>
   </div>
-  <div class="controls" data-hide-mobile style="margin-left:0">
-    <span class="mode-label">REFRESH</span>
+  <div class="controls" data-hide-mobile>
     <button class="btn active" data-refresh="10">10s</button>
     <button class="btn" data-refresh="30">30s</button>
     <button class="btn" data-refresh="0">pause</button>
   </div>
-  <div class="controls" data-hide-mobile style="margin-left:0">
-    <span class="mode-label">BIG BUY</span>
+  <div class="controls" data-hide-mobile>
     <select id="whaleSelect" style="font-size:10px;padding:4px 8px;letter-spacing:.1em;text-transform:uppercase">
       <option value="50000">≥ $50K</option>
       <option value="100000" selected>≥ $100K</option>
@@ -53,16 +57,17 @@
       <option value="1000000">≥ $1M</option>
     </select>
   </div>
-  <div style="display:flex;gap:6px;margin-left:auto;flex-shrink:0">
-    <a href="/" class="nav-pill">overview</a>
-    <a href="/explorer" class="nav-pill">explorer</a>
-    <a href="/watchlist" class="nav-pill">watchlist</a>
-    <a href="/traders" class="nav-pill">traders</a>
-  </div>
   <div class="status">
     <span class="dot" id="statusDot"></span>
     <span id="statusText">connecting…</span>
     <span style="color:var(--ink-faint);margin-left:12px">last sync <span id="lastSync">—</span></span>
+  </div>
+  <div class="hdr-nav-mobile">
+    <a href="/" class="nav-pill-hdr">Overview</a>
+    <a href="/lit" class="nav-pill-hdr here">LIT</a>
+    <a href="/explorer" class="nav-pill-hdr">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
   </div>
 </header>
 
@@ -97,11 +102,6 @@
     <div class="val" id="kpi-stored">—</div>
     <div class="sub" id="kpi-stored-sub">building history…</div>
   </div>
-  <div class="kpi" id="kpi-backfill" style="cursor:pointer" title="Click to trigger next batch" onclick="triggerBackfill()">
-    <div class="lbl">Deep History</div>
-    <div class="val" id="kpi-backfill-val">—</div>
-    <div class="sub" id="kpi-backfill-sub">accounts backfilled</div>
-  </div>
 </section>
 
 <!-- Tracked Wallets -->
@@ -132,10 +132,13 @@
   </table>
 </div>
 
-<section class="grid">
+<main class="bento">
+
   <!-- live trades -->
-  <div class="panel">
-    <h2>Live Trades <span class="count" id="tradeCount"></span></h2>
+  <section class="card span-7">
+    <div class="card-head">
+      <span class="card-title">Live Trades <span class="count" id="tradeCount"></span></span>
+    </div>
     <div style="flex:1;overflow:auto;max-height:calc(100vh - 320px)">
       <table id="litTradesTable">
         <thead>
@@ -155,176 +158,148 @@
         </tbody>
       </table>
     </div>
-  </div>
+  </section>
 
-  <!-- right column -->
-  <div>
-    <div class="row">
-      <div class="panel">
-        <h2>Buy / Sell Flow <span class="count" id="flowPeriod"></span></h2>
-        <div style="display:flex;align-items:baseline;gap:20px;margin-bottom:14px">
-          <div>
-            <div class="flow-lbl">Buy</div>
-            <div class="up flow-val" id="flowBuy">—</div>
-          </div>
-          <div>
-            <div class="flow-lbl">Sell</div>
-            <div class="down flow-val" id="flowSell">—</div>
-          </div>
-          <div style="margin-left:auto;text-align:right">
-            <div class="flow-lbl">Delta</div>
-            <div class="flow-val" id="flowDelta">—</div>
-          </div>
-        </div>
-        <div class="flow-bar">
-          <div id="barBuy" style="background:var(--green);width:50%"></div>
-          <div id="barSell" style="background:var(--red);width:50%"></div>
-        </div>
-        <div class="flow-pct"><span id="pctBuy">—</span><span id="pctSell">—</span></div>
-        <div style="margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px">
-          <div>
-            <div class="section-lbl">Trades Recorded</div>
-            <div id="flowTrades" style="font-variant-numeric:tabular-nums">—</div>
-          </div>
-          <div>
-            <div class="section-lbl">Window Coverage</div>
-            <div id="flowCoverage" style="color:var(--ink-dim);font-size:11px">—</div>
-          </div>
-        </div>
+  <!-- buy/sell flow + perp stats -->
+  <section class="card span-5">
+    <div class="card-head">
+      <span class="card-title">Buy / Sell Flow <span class="count" id="flowPeriod"></span></span>
+    </div>
+    <div style="display:flex;align-items:baseline;gap:20px;margin-bottom:14px">
+      <div>
+        <div class="flow-lbl">Buy</div>
+        <div class="up flow-val" id="flowBuy">—</div>
+      </div>
+      <div>
+        <div class="flow-lbl">Sell</div>
+        <div class="down flow-val" id="flowSell">—</div>
+      </div>
+      <div style="margin-left:auto;text-align:right">
+        <div class="flow-lbl">Delta</div>
+        <div class="flow-val" id="flowDelta">—</div>
+      </div>
+    </div>
+    <div class="flow-bar">
+      <div id="barBuy" style="background:var(--green);width:50%"></div>
+      <div id="barSell" style="background:var(--red);width:50%"></div>
+    </div>
+    <div class="flow-pct"><span id="pctBuy">—</span><span id="pctSell">—</span></div>
+    <div style="margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px">
+      <div>
+        <div class="section-lbl">Trades Recorded</div>
+        <div id="flowTrades" style="font-variant-numeric:tabular-nums">—</div>
+      </div>
+      <div>
+        <div class="section-lbl">Window Coverage</div>
+        <div id="flowCoverage" style="color:var(--ink-dim);font-size:11px">—</div>
       </div>
     </div>
 
-    <div class="row">
-      <div class="panel">
-        <h2>Perp Stats <span class="count">current</span></h2>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:12px">
-          <div>
-            <div class="section-lbl">Funding 8h</div>
-            <div class="flow-val" id="fundingRate" style="font-size:18px">—</div>
-          </div>
-          <div>
-            <div class="section-lbl">Funding APR</div>
-            <div class="flow-val" id="fundingApr" style="font-size:18px">—</div>
-          </div>
-          <div>
-            <div class="section-lbl">24h Volume</div>
-            <div id="perpVol" style="font-variant-numeric:tabular-nums">—</div>
-          </div>
-          <div>
-            <div class="section-lbl">24h Trades</div>
-            <div id="perpTrades" style="font-variant-numeric:tabular-nums">—</div>
-          </div>
-          <div>
-            <div class="section-lbl">24h High</div>
-            <div id="perpHigh" style="color:var(--green);font-variant-numeric:tabular-nums">—</div>
-          </div>
-          <div>
-            <div class="section-lbl">24h Low</div>
-            <div id="perpLow" style="color:var(--red);font-variant-numeric:tabular-nums">—</div>
-          </div>
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+      <div class="card-title" style="margin-bottom:10px">Perp Stats <span class="count">current</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:12px">
+        <div>
+          <div class="section-lbl">Funding 8h</div>
+          <div class="flow-val" id="fundingRate" style="font-size:18px">—</div>
+        </div>
+        <div>
+          <div class="section-lbl">Funding APR</div>
+          <div class="flow-val" id="fundingApr" style="font-size:18px">—</div>
+        </div>
+        <div>
+          <div class="section-lbl">24h Volume</div>
+          <div id="perpVol" style="font-variant-numeric:tabular-nums">—</div>
+        </div>
+        <div>
+          <div class="section-lbl">24h Trades</div>
+          <div id="perpTrades" style="font-variant-numeric:tabular-nums">—</div>
+        </div>
+        <div>
+          <div class="section-lbl">24h High</div>
+          <div id="perpHigh" style="color:var(--green);font-variant-numeric:tabular-nums">—</div>
+        </div>
+        <div>
+          <div class="section-lbl">24h Low</div>
+          <div id="perpLow" style="color:var(--red);font-variant-numeric:tabular-nums">—</div>
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- CVD chart -->
-<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <h2>Cumulative Volume Delta <span class="count">buy − sell pressure over time</span></h2>
-  <div id="cvdChart" style="min-height:72px"></div>
-</div>
+  <!-- CVD chart -->
+  <section class="card span-12">
+    <div class="card-head">
+      <span class="card-title">Cumulative Volume Delta <span class="count">buy − sell pressure over time</span></span>
+    </div>
+    <div id="cvdChart" style="min-height:72px"></div>
+  </section>
 
-<!-- LIT Price Chart -->
-<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <h2>LIT Price
-    <span class="count" id="chartPriceLabel"></span>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
-      <button class="btn-sm" data-res="5m">5m</button>
-      <button class="btn-sm" data-res="15m">15m</button>
-      <button class="btn-sm active" data-res="1h">1h</button>
-      <button class="btn-sm" data-res="4h">4h</button>
-      <button class="btn-sm" data-res="1d">1d</button>
-    </span>
-  </h2>
-  <div id="litPriceChart" style="width:100%;height:200px;position:relative">
-    <div style="color:var(--ink-faint);font-size:11px;padding:12px 0">loading chart…</div>
-  </div>
-  <div id="litVolumeChart" style="width:100%;height:40px;margin-top:2px"></div>
-  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:4px" id="chartAxisLabel">
-    <span></span><span></span>
-  </div>
-</div>
+  <!-- LIT Price Chart -->
+  <section class="card span-12">
+    <div class="card-head">
+      <span class="card-title">LIT Price <span class="count" id="chartPriceLabel"></span></span>
+      <div class="tools">
+        <button class="btn-sm" data-res="5m">5m</button>
+        <button class="btn-sm" data-res="15m">15m</button>
+        <button class="btn-sm active" data-res="1h">1h</button>
+        <button class="btn-sm" data-res="4h">4h</button>
+        <button class="btn-sm" data-res="1d">1d</button>
+      </div>
+    </div>
+    <div id="litPriceChart" style="width:100%;height:200px;position:relative">
+      <div style="color:var(--ink-faint);font-size:11px;padding:12px 0">loading chart…</div>
+    </div>
+    <div id="litVolumeChart" style="width:100%;height:40px;margin-top:2px"></div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:4px" id="chartAxisLabel">
+      <span></span><span></span>
+    </div>
+  </section>
 
-<!-- Order Book Heatmap -->
-<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <h2>Order Book Heatmap
-    <span class="count">LIT-PERP · bid/ask depth over time</span>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:10px;font-size:10px;color:var(--ink-faint)">
-      <span><span style="display:inline-block;width:10px;height:10px;background:rgba(111,224,137,0.7);vertical-align:middle;margin-right:3px"></span>bids</span>
-      <span><span style="display:inline-block;width:10px;height:10px;background:rgba(255,90,90,0.7);vertical-align:middle;margin-right:3px"></span>asks</span>
-    </span>
-  </h2>
-  <canvas id="obHeatmap" style="display:block;width:100%;height:220px;cursor:crosshair"></canvas>
-  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:4px">
-    <span id="hmTimeLabel">waiting for data…</span>
-    <span id="hmMidLabel"></span>
-    <span>now →</span>
-  </div>
-</div>
+  <!-- TWAP / Pressure alerts -->
+  <section class="card span-12">
+    <div class="card-head">
+      <span class="card-title">Pressure Alerts · TWAP <span class="count" id="twapCount"></span></span>
+      <div class="tools">
+        <span style="color:var(--ink-faint);font-size:10px">WINDOW</span>
+        <select id="twapWindowSelect" style="font-size:10px;padding:3px 8px;text-transform:uppercase;letter-spacing:.08em">
+          <option value="300000">5 min</option>
+          <option value="600000" selected>10 min</option>
+          <option value="900000">15 min</option>
+          <option value="1800000">30 min</option>
+        </select>
+        <span style="color:var(--ink-faint);font-size:10px">MIN TRADES</span>
+        <select id="twapMinTrades" style="font-size:10px;padding:3px 8px">
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="5">5</option>
+        </select>
+      </div>
+    </div>
+    <table id="twapTable">
+      <thead>
+        <tr>
+          <th>Side</th>
+          <th>Account</th>
+          <th class="num">Cumulative USD</th>
+          <th class="num">Trades</th>
+          <th class="num">Avg / Trade</th>
+          <th class="num">Largest Single</th>
+          <th class="num">First Seen</th>
+          <th class="num">Last Seen</th>
+          <th class="num">Spacing</th>
+        </tr>
+      </thead>
+      <tbody id="twapBody">
+        <tr><td colspan="9" class="empty">no TWAP patterns detected</td></tr>
+      </tbody>
+    </table>
+  </section>
 
-<!-- TWAP / Pressure alerts -->
-<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <h2>Pressure Alerts · TWAP
-    <span class="count" id="twapCount"></span>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
-      <span style="color:var(--ink-faint);font-size:10px">WINDOW</span>
-      <select id="twapWindowSelect" style="font-size:10px;padding:3px 8px;text-transform:uppercase;letter-spacing:.08em">
-        <option value="300000">5 min</option>
-        <option value="600000" selected>10 min</option>
-        <option value="900000">15 min</option>
-        <option value="1800000">30 min</option>
-      </select>
-      <span style="color:var(--ink-faint);font-size:10px">MIN TRADES</span>
-      <select id="twapMinTrades" style="font-size:10px;padding:3px 8px">
-        <option value="2">2</option>
-        <option value="3" selected>3</option>
-        <option value="5">5</option>
-      </select>
-    </span>
-  </h2>
-  <table id="twapTable">
-    <thead>
-      <tr>
-        <th>Side</th>
-        <th>Account</th>
-        <th class="num">Cumulative USD</th>
-        <th class="num">Trades</th>
-        <th class="num">Avg / Trade</th>
-        <th class="num">Largest Single</th>
-        <th class="num">First Seen</th>
-        <th class="num">Last Seen</th>
-        <th class="num">Spacing</th>
-      </tr>
-    </thead>
-    <tbody id="twapBody">
-      <tr><td colspan="9" class="empty">no TWAP patterns detected</td></tr>
-    </tbody>
-  </table>
-</div>
-
-<!-- cross-exchange funding comparison -->
-<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <h2>Funding Rate Comparison <span class="count">LIT-PERP · all exchanges</span></h2>
-  <div id="fundingGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)">
-    <div style="background:var(--bg);padding:14px;color:var(--ink-faint);font-size:11px">loading…</div>
-  </div>
-  <div id="fundingArb" style="margin-top:10px;font-size:11px"></div>
-</div>
-
-<!-- leaders tables -->
-<div class="leaders-grid">
-  <div class="panel">
-    <h2>Top Buyers <span class="count" id="buyersPeriod"></span></h2>
+  <!-- leaders tables -->
+  <section class="card span-6">
+    <div class="card-head">
+      <span class="card-title">Top Buyers <span class="count" id="buyersPeriod"></span></span>
+    </div>
     <table id="buyersTable">
       <thead>
         <tr>
@@ -341,10 +316,12 @@
         <tr><td colspan="7" class="empty">accumulating data…</td></tr>
       </tbody>
     </table>
-  </div>
+  </section>
 
-  <div class="panel">
-    <h2>Top Sellers <span class="count" id="sellersPeriod"></span></h2>
+  <section class="card span-6">
+    <div class="card-head">
+      <span class="card-title">Top Sellers <span class="count" id="sellersPeriod"></span></span>
+    </div>
     <table id="sellersTable">
       <thead>
         <tr>
@@ -361,79 +338,22 @@
         <tr><td colspan="7" class="empty">accumulating data…</td></tr>
       </tbody>
     </table>
-  </div>
-</div>
+  </section>
 
-<!-- protocol buybacks -->
-<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <h2>Protocol Buybacks
-    <span class="count" id="buybackCount"></span>
-    <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
-      <button class="btn active" data-bperiod="7">7d</button>
-      <button class="btn" data-bperiod="30">30d</button>
-      <button class="btn" data-bperiod="0">all</button>
-    </span>
-  </h2>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:12px" id="buybackKpis">
-    <div style="background:var(--bg);padding:14px;color:var(--ink-faint);font-size:11px">loading…</div>
-  </div>
-  <div id="buybackChart" style="min-height:80px;margin-bottom:8px"></div>
-  <table id="buybackTable">
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th class="num">Volume (USD)</th>
-        <th class="num">Trades</th>
-        <th class="num">Avg / Trade</th>
-      </tr>
-    </thead>
-    <tbody id="buybackBody">
-      <tr><td colspan="4" class="empty">loading…</td></tr>
-    </tbody>
-  </table>
-</div>
-
-<!-- staking stats -->
-<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <h2>Staking Pool Stats <span class="count" id="stakingStatsAge"></span></h2>
-  <div id="stakingStatsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)">
-    <div style="background:var(--bg);padding:16px;color:var(--ink-faint);font-size:11px;grid-column:1/-1">loading staking stats…</div>
-  </div>
-</div>
-
-<!-- staking activity feed -->
-<div class="panel" style="background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
-  <h2>LIT Staking Activity
-    <span class="count" id="stakingCount"></span>
-    <span style="margin-left:auto">
-      <button id="refreshStakingBtn" class="btn" style="font-size:9px;padding:3px 10px">↺ refresh</button>
-    </span>
-  </h2>
-  <table id="stakingTable">
-    <thead>
-      <tr>
-        <th>Time (MYT)</th>
-        <th>Type</th>
-        <th>Account</th>
-        <th class="num">Amount (USDC)</th>
-      </tr>
-    </thead>
-    <tbody id="stakingBody">
-      <tr><td colspan="4" class="empty">loading staking activity…</td></tr>
-    </tbody>
-  </table>
-</div>
+</main>
 
 <footer>
   <span>backend · <a href="/docs" target="_blank">/docs</a> · <a href="/api/lit/summary" target="_blank">/api/lit/summary</a></span>
   <span style="color:var(--ink-faint)">·</span>
   <span id="tickCount">0 polls</span>
+  <span style="color:var(--ink-faint)">·</span>
+  <span id="footerBackfill" style="color:var(--ink-faint)">backfill —</span>
   <div class="spacer"></div>
   <span>LIT perp #120 · LIT/USDC spot #2049</span>
   <span style="color:var(--ink-faint)">·</span>
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/lit.js?v=20260719a"></script>
+<script type="module" src="/static/lit.js?v=20260720a"></script>
 </body>
 </html>

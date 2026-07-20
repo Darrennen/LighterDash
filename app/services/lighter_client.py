@@ -20,6 +20,11 @@ log = logging.getLogger("lighter.client")
 EXPLORER_API = "https://explorer.elliot.ai/api"
 
 
+class UpstreamUnavailable(Exception):
+    """Raised when Lighter's own API rate-limits or WAF-blocks a request —
+    distinct from a genuine 'account not found', so routes can say so honestly."""
+
+
 class LighterClient:
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
@@ -120,6 +125,11 @@ class LighterClient:
     async def account(self, by: str = "index", value: str = "") -> dict:
         try:
             j = await self._get("/account", params={"by": by, "value": value})
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (429, 405, 403):
+                raise UpstreamUnavailable(f"Lighter API returned {e.response.status_code}") from e
+            log.debug("account(%s=%s) failed: %s", by, value, e)
+            return {}
         except httpx.HTTPError as e:
             log.debug("account(%s=%s) failed: %s", by, value, e)
             return {}

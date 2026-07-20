@@ -4,10 +4,11 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Explorer · Lighter Cockpit</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='8' y='8' width='16' height='16' rx='3' transform='rotate(45 16 16)' fill='%236fb9ff'/></svg>" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/static/styles.css?v=20260719a" />
+<link rel="stylesheet" href="/static/styles.css?v=20260720a" />
 <style>
   .search-wrap{display:flex;gap:8px;align-items:center;max-width:560px}
   .search-input{flex:1;background:var(--bg);border:1px solid var(--line-2);border-radius:3px;padding:8px 14px;font-family:var(--font-mono);font-size:13px;color:var(--ink);outline:none;transition:border-color .15s}
@@ -48,32 +49,44 @@
 <body>
 
 <header>
-  <div class="brand">
-    <a href="/" class="mark" style="text-decoration:none">lighter</a>
-    <span class="sub">Account Explorer</span>
-  </div>
-  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-    <a href="/" class="nav-pill">← overview</a>
-    <a href="/lit" class="nav-pill">LIT tracker</a>
-    <a href="/watchlist" class="nav-pill">watchlist</a>
-    <a href="/traders" class="nav-pill">traders</a>
+  <a class="brand" href="/">
+    <span class="glyph"></span>
+    <span class="mark">lighter</span>
+    <span class="sub">cockpit</span>
+  </a>
+  <nav style="display:flex;gap:6px">
+    <a href="/" class="nav-pill-hdr">Overview</a>
+    <a href="/lit" class="nav-pill-hdr">LIT</a>
+    <a href="/explorer" class="nav-pill-hdr here">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
+  </nav>
+  <div class="hdr-nav-mobile">
+    <a href="/" class="nav-pill-hdr">Overview</a>
+    <a href="/lit" class="nav-pill-hdr">LIT</a>
+    <a href="/explorer" class="nav-pill-hdr here">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
   </div>
 </header>
 
-<section style="padding:24px 0 0">
-  <div style="max-width:800px;margin:0 auto;padding:0 20px">
-    <div style="margin-bottom:20px">
-      <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px">Search Account</div>
-      <div class="search-wrap">
-        <input id="searchInput" class="search-input" type="text"
-          placeholder="Account # (e.g. 8913) or 0x wallet address" autocomplete="off" spellcheck="false" />
-        <button id="searchBtn" class="search-btn">Lookup</button>
-      </div>
-      <div style="font-size:10px;color:var(--ink-faint);margin-top:6px">
-        Enter a numeric account index or an Ethereum wallet address (0x…)
-      </div>
+<section id="searchHero" style="display:flex;align-items:center;justify-content:center;min-height:32vh;padding:24px 20px">
+  <div class="card" style="max-width:560px;width:100%">
+    <div class="card-head"><span class="card-title">Search account</span></div>
+    <div class="search-wrap">
+      <input id="searchInput" class="search-input" type="text"
+        placeholder="Account # (e.g. 8913) or 0x wallet address" autocomplete="off" spellcheck="false" />
+      <button id="searchBtn" class="search-btn">Lookup</button>
     </div>
-
+    <div style="font-size:10px;color:var(--ink-faint);margin-top:8px">
+      Enter a numeric account index or an Ethereum wallet address (0x…)
+    </div>
+    <div style="display:flex;gap:6px;margin-top:14px;flex-wrap:wrap">
+      <span style="font-size:10px;color:var(--ink-faint);align-self:center;letter-spacing:.08em;text-transform:uppercase">Try</span>
+      <button class="btn-sm example-acct" data-acct="702389">#702389</button>
+      <button class="btn-sm example-acct" data-acct="40671">#40671</button>
+      <button class="btn-sm example-acct" data-acct="726722">#726722</button>
+    </div>
     <div id="loadingBox">Looking up account…</div>
     <div id="errorBox"></div>
   </div>
@@ -330,6 +343,6 @@
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/explorer.js?v=20260719a"></script>
+<script type="module" src="/static/explorer.js?v=20260720a"></script>
 </body>
 </html>

@@ -7,7 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/static/styles.css?v=20260719a" />
+<link rel="stylesheet" href="/static/styles.css?v=20260720a" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='8' y='8' width='16' height='16' rx='3' transform='rotate(45 16 16)' fill='%236fb9ff'/></svg>" />
 <style>
   .rank{color:var(--ink-faint);font-size:11px;width:24px}
   .acct-link{color:var(--ink);text-decoration:none;font-variant-numeric:tabular-nums}
@@ -25,20 +26,29 @@
 <body>
 
 <header>
-  <div class="brand">
-    <a href="/" class="mark" style="text-decoration:none">lighter</a>
-    <span class="sub">Traders</span>
-  </div>
-  <div style="display:flex;gap:6px;margin-left:auto;flex-shrink:0">
-    <a href="/lit" class="nav-pill">lit tracker</a>
-    <a href="/explorer" class="nav-pill">explorer</a>
-    <a href="/watchlist" class="nav-pill">watchlist</a>
-    <a href="/" class="nav-pill">← overview</a>
-  </div>
+  <a class="brand" href="/">
+    <span class="glyph"></span>
+    <span class="mark">lighter</span>
+    <span class="sub">cockpit</span>
+  </a>
+  <nav style="display:flex;gap:6px">
+    <a href="/" class="nav-pill-hdr">Overview</a>
+    <a href="/lit" class="nav-pill-hdr">LIT</a>
+    <a href="/explorer" class="nav-pill-hdr">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr here">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
+  </nav>
   <div class="status">
     <span class="dot" id="statusDot"></span>
     <span id="statusText">connecting…</span>
     <span style="color:var(--ink-faint);margin-left:12px">last sync <span id="lastSync">—</span></span>
+  </div>
+  <div class="hdr-nav-mobile">
+    <a href="/" class="nav-pill-hdr">Overview</a>
+    <a href="/lit" class="nav-pill-hdr">LIT</a>
+    <a href="/explorer" class="nav-pill-hdr">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr here">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
   </div>
 </header>
 
@@ -126,6 +136,6 @@
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/traders.js?v=20260719a"></script>
+<script type="module" src="/static/traders.js?v=20260720a"></script>
 </body>
 </html>

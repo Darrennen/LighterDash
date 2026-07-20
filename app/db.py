@@ -479,6 +479,52 @@ async def fetch_lit_top_accounts(hours: int = 168, limit: int = 20) -> list[int]
     return [int(r[0]) for r in rows if r[0]]
 
 
+async def fetch_lit_candles_db(
+    market_id: int, minutes: int, count: int
+) -> list[dict[str, Any]]:
+    """Bucket lit_trades into `minutes`-wide OHLCV candles.
+
+    o = first trade price in bucket, h/l = high/low, c = last trade price,
+    v = sum(usd). Returns the newest `count` buckets, ascending by time.
+    """
+    bucket_ms = minutes * 60_000
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """
+            WITH base AS (
+                SELECT ts, price, usd, (ts / ?) AS bucket_idx
+                FROM lit_trades
+                WHERE market_id = ?
+            ),
+            ranked AS (
+                SELECT bucket_idx, price, usd,
+                       ROW_NUMBER() OVER (PARTITION BY bucket_idx ORDER BY ts ASC)  AS rn_first,
+                       ROW_NUMBER() OVER (PARTITION BY bucket_idx ORDER BY ts DESC) AS rn_last
+                FROM base
+            ),
+            agg AS (
+                SELECT bucket_idx,
+                       MAX(CASE WHEN rn_first = 1 THEN price END) AS o,
+                       MAX(price) AS h,
+                       MIN(price) AS l,
+                       MAX(CASE WHEN rn_last = 1 THEN price END) AS c,
+                       SUM(usd) AS v
+                FROM ranked
+                GROUP BY bucket_idx
+                ORDER BY bucket_idx DESC
+                LIMIT ?
+            )
+            SELECT bucket_idx * ? AS t, o, h, l, c, v FROM agg ORDER BY bucket_idx ASC
+            """,
+            (bucket_ms, market_id, count, bucket_ms),
+        )
+        rows = await cur.fetchall()
+    return [
+        {"t": r[0], "o": r[1], "h": r[2], "l": r[3], "c": r[4], "v": r[5]}
+        for r in rows
+    ]
+
+
 async def fetch_lit_stats() -> dict[str, Any]:
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute("SELECT COUNT(*), MIN(ts), MAX(ts) FROM lit_trades")

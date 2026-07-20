@@ -491,6 +491,8 @@ function drawPnlChart(series) {
 
 function renderAccount(data, priceMap = {}) {
   $('#results').style.display = '';
+  $('#searchHero').style.minHeight = '0';
+  $('#searchHero').style.padding = '18px 20px';
   const idx = data.account_index;
   _currentAccountIndex = idx;
 
@@ -976,7 +978,7 @@ async function doSearch() {
 
   $('#errorBox').style.display = 'none';
   $('#results').style.display = 'none';
-  $('#loadingBox').style.display = '';
+  $('#loadingBox').style.display = 'block';
   $('#searchBtn').disabled = true;
 
   try {
@@ -986,7 +988,9 @@ async function doSearch() {
     ]);
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${r.status}`);
+      const e = new Error(err.detail || `HTTP ${r.status}`);
+      e.isUpstream = r.status === 503;
+      throw e;
     }
     const data = await r.json();
 
@@ -1006,8 +1010,8 @@ async function doSearch() {
     $('[data-tab="positions"]').classList.add('active');
     $('#tab-positions').classList.add('active');
   } catch (e) {
-    $('#errorBox').textContent = 'Account not found: ' + e.message;
-    $('#errorBox').style.display = '';
+    $('#errorBox').textContent = e.isUpstream ? e.message : 'Account not found: ' + e.message;
+    $('#errorBox').style.display = 'block';
   } finally {
     $('#loadingBox').style.display = 'none';
     $('#searchBtn').disabled = false;
@@ -1016,6 +1020,12 @@ async function doSearch() {
 
 $('#searchBtn').addEventListener('click', doSearch);
 $('#searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+$$('.example-acct').forEach(b => {
+  b.addEventListener('click', () => {
+    $('#searchInput').value = b.dataset.acct;
+    doSearch();
+  });
+});
 
 // pre-fill from URL param ?q=
 const urlQ = new URLSearchParams(location.search).get('q');

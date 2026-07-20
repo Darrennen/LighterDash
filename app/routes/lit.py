@@ -5,18 +5,16 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query
 
 from app.db import (
-    fetch_all_lit_account_ids,
     fetch_backfill_status,
-    fetch_backfilled_ids,
     fetch_lit_account_flow,
     fetch_lit_account_trades,
+    fetch_lit_candles_db,
     fetch_lit_flow,
     fetch_lit_leaders,
     fetch_lit_stats,
-    fetch_lit_top_accounts,
     fetch_lit_trades,
     init_db,
 )
@@ -28,7 +26,6 @@ from app.services.collector import (
     collect_once,
 )
 from app.services.lighter_client import client
-from app.services.ratelimit import staking_limiter
 from app.services.store import store
 
 router = APIRouter()
@@ -40,24 +37,6 @@ _db_ready: bool = False
 _backfill_done: bool = False
 _deep_backfill_triggered: bool = False
 _TTL = 5.0
-
-_LIT_STAKING_POOL = 281_474_976_710_654
-
-_staking_cache: dict | None = None
-_staking_cache_ts: float = 0.0
-_STAKING_TTL = 60.0
-
-_buybacks_cache: dict | None = None
-_buybacks_cache_ts: float = 0.0
-_BUYBACKS_TTL = 300.0  # 5 min
-
-_staking_stats_cache: dict | None = None
-_staking_stats_cache_ts: float = 0.0
-_STAKING_STATS_TTL = 120.0  # 2 min
-
-_ob_cache: dict | None = None
-_ob_cache_ts: float = 0.0
-_OB_TTL = 2.0  # 2-second cache — callers poll every 3s
 
 _candles_cache: dict = {}
 _candles_cache_ts: dict = {}
@@ -263,225 +242,29 @@ async def account_trades(
     return {"trades": data, "count": len(data), "account_id": account_id, "role": safe_role}
 
 
-@router.get("/funding")
-async def lit_funding():
-    """Cross-exchange funding rates for LIT-PERP (market_id=120)."""
-    rates = await client.funding_rates_raw()
-    lit_rows = [
-        f for f in rates
-        if int(f.get("market_id") or f.get("marketId") or -1) == 120
-    ]
-    # Build a dict keyed by exchange name for easy frontend consumption
-    by_exchange: dict = {}
-    for row in lit_rows:
-        exch = (row.get("exchange") or "lighter").lower()
-        by_exchange[exch] = row.get("rate") or row.get("funding_rate")
-    return {"market_id": 120, "by_exchange": by_exchange, "rows": lit_rows}
-
-
-@router.get("/staking-activity")
-async def staking_activity(request: Request):
-    """Recent LIT stake/unstake events from top traders' on-chain logs."""
-    global _staking_cache, _staking_cache_ts
-    now = time.time()
-    if _staking_cache and now - _staking_cache_ts < _STAKING_TTL:
-        return _staking_cache
-
-    client_ip = request.client.host if request.client else "unknown"
-    if not staking_limiter.is_allowed(client_ip):
-        raise HTTPException(status_code=429, detail="Too many requests — please slow down")
-
-    await _maybe_refresh()
-    account_ids = await fetch_lit_top_accounts(hours=168, limit=20)
-    if not account_ids:
-        return {"events": [], "accounts_scanned": 0}
-
-    async def get_address(acct_id: int) -> dict:
-        try:
-            data = await client.account(by="index", value=str(acct_id))
-            return {"id": acct_id, "address": data.get("l1_address", "")}
-        except Exception:
-            return {"id": acct_id, "address": ""}
-
-    acct_list = await asyncio.gather(*[get_address(aid) for aid in account_ids])
-
-    async def get_staking_events(acct: dict) -> list[dict]:
-        addr = acct.get("address", "")
-        if not addr:
-            return []
-        try:
-            logs = await client.account_logs(address=addr, limit=50)
-        except Exception:
-            return []
-        events = []
-        for entry in logs:
-            log_type = entry.get("type", "")
-            pubdata = entry.get("pubdata") or {}
-            if log_type == "L2MintShares":
-                ms = pubdata.get("mint_shares_pubdata") or {}
-                if int(ms.get("public_pool_index") or 0) == _LIT_STAKING_POOL:
-                    events.append({
-                        "type": "stake",
-                        "account_id": acct["id"],
-                        "time": entry.get("time"),
-                        "amount": float(ms.get("principal_amount") or 0),
-                        "hash": entry.get("hash"),
-                    })
-            elif log_type in ("BurnedShares", "BurnShares"):
-                bs = (pubdata.get("burn_shares_pubdata")
-                      or pubdata.get("burned_shares_pubdata") or {})
-                if int(bs.get("public_pool_index") or 0) == _LIT_STAKING_POOL:
-                    events.append({
-                        "type": "unstake",
-                        "account_id": acct["id"],
-                        "time": entry.get("time"),
-                        "amount": float(bs.get("principal_amount") or 0),
-                        "hash": entry.get("hash"),
-                    })
-        return events
-
-    results = await asyncio.gather(*[get_staking_events(a) for a in acct_list])
-    all_events: list[dict] = []
-    for r in results:
-        all_events.extend(r)
-    all_events.sort(key=lambda x: x.get("time") or "", reverse=True)
-
-    result = {
-        "events": all_events[:50],
-        "accounts_scanned": len(account_ids),
-        "ts": now,
-    }
-    _staking_cache = result
-    _staking_cache_ts = now
-    return result
-
-
-@router.get("/staking-stats")
-async def staking_stats_endpoint():
-    """Pool-wide LIT staking stats: 24h / 7d stake flows and unique stakers."""
-    global _staking_stats_cache, _staking_stats_cache_ts
-    now = time.time()
-    if _staking_stats_cache and now - _staking_stats_cache_ts < _STAKING_STATS_TTL:
-        return _staking_stats_cache
-
-    transfers = await client.staking_pool_transfers(_LIT_STAKING_POOL, limit=100)
-
-    now_ms = int(now * 1000)
-
-    def _parse_ts(raw) -> int:
-        if isinstance(raw, (int, float)):
-            return int(raw) if raw > 1e10 else int(raw * 1000)
-        from datetime import datetime
-        try:
-            return int(datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp() * 1000)
-        except Exception:
-            return 0
-
-    events: list[dict] = []
-    for t in transfers:
-        ts_ms = _parse_ts(
-            t.get("created_at") or t.get("timestamp") or t.get("time") or 0
-        )
-        ev_type = (t.get("type") or "").lower()
-        is_stake = "mint" in ev_type
-        is_unstake = "burn" in ev_type
-        if not (is_stake or is_unstake):
-            continue
-
-        amount = 0.0
-        for key in ("principal_amount", "amount", "usdc_amount", "value"):
-            v = t.get(key)
-            if v is not None:
-                try:
-                    amount = float(v)
-                    break
-                except (TypeError, ValueError):
-                    pass
-
-        account_id = int(
-            t.get("account_index") or t.get("user_account_index") or 0
-        )
-        events.append({
-            "type": "stake" if is_stake else "unstake",
-            "ts_ms": ts_ms,
-            "amount": amount,
-            "account_id": account_id,
-        })
-
-    def _window(cutoff_ms: int) -> dict:
-        w = [e for e in events if e["ts_ms"] >= cutoff_ms]
-        stakes   = [e for e in w if e["type"] == "stake"]
-        unstakes = [e for e in w if e["type"] == "unstake"]
-        stake_usd   = sum(e["amount"] for e in stakes)
-        unstake_usd = sum(e["amount"] for e in unstakes)
-        return {
-            "stakes":           len(stakes),
-            "unstakes":         len(unstakes),
-            "stake_usd":        stake_usd,
-            "unstake_usd":      unstake_usd,
-            "net_usd":          stake_usd - unstake_usd,
-            "unique_accounts":  len({e["account_id"] for e in w}),
-        }
-
-    result = {
-        "h24":          _window(now_ms - 86_400_000),
-        "h168":         _window(now_ms - 7 * 86_400_000),
-        "total_events": len(events),
-        "raw_count":    len(transfers),
-        "ts":           now,
-    }
-    _staking_stats_cache = result
-    _staking_stats_cache_ts = now
-    return result
-
-
-@router.get("/buybacks")
-async def buybacks():
-    """Protocol LIT buyback daily stats + treasury balances."""
-    global _buybacks_cache, _buybacks_cache_ts
-    now = time.time()
-    if _buybacks_cache and now - _buybacks_cache_ts < _BUYBACKS_TTL:
-        return _buybacks_cache
-    data = await client.buybacks_data()
-    if data:
-        _buybacks_cache = data
-        _buybacks_cache_ts = now
-    return _buybacks_cache or {}
-
-
-@router.get("/orderbook")
-async def orderbook(market_id: int = Query(120)):
-    """Live order book snapshot for one market (default LIT-PERP #120)."""
-    global _ob_cache, _ob_cache_ts
-    now = time.time()
-    if _ob_cache is not None and now - _ob_cache_ts < _OB_TTL:
-        return _ob_cache
-    try:
-        data = await client.order_book(market_id)
-    except Exception as e:
-        log.warning("orderbook fetch failed: %s", e)
-        data = {}
-    _ob_cache = {"market_id": market_id, "ts": int(now * 1000), **data}
-    _ob_cache_ts = now
-    return _ob_cache
-
-
 @router.get("/candles")
 async def candles(
     resolution: str = Query("1h", pattern="^(5m|15m|1h|4h|1d)$"),
     count: int = Query(72, ge=10, le=200),
     market_id: int = Query(120),
 ):
-    """OHLCV candles for LIT markets."""
+    """OHLCV candles for LIT markets — built from the local trade ledger
+    (lit_trades), falling back to the upstream API if too little local data."""
     cache_key = f"{market_id}_{resolution}"
     now = time.time()
     if cache_key in _candles_cache and now - _candles_cache_ts.get(cache_key, 0) < _CANDLES_TTL:
         return _candles_cache[cache_key]
-    try:
-        raw = await client.candles(market_id=market_id, resolution=resolution, count=count)
-    except Exception as e:
-        log.warning("candles fetch failed: %s", e)
-        raw = []
+
+    minutes = {"5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}[resolution]
+    db_candles = await fetch_lit_candles_db(market_id=market_id, minutes=minutes, count=count)
+    if len(db_candles) >= 2:
+        raw = db_candles
+    else:
+        try:
+            raw = await client.candles(market_id=market_id, resolution=resolution, count=count)
+        except Exception as e:
+            log.warning("candles fetch failed: %s", e)
+            raw = []
     result = {"candles": raw, "market_id": market_id, "resolution": resolution, "ts": int(now * 1000)}
     _candles_cache[cache_key] = result
     _candles_cache_ts[cache_key] = now

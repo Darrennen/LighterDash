@@ -7,7 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/static/styles.css?v=20260719a" />
+<link rel="stylesheet" href="/static/styles.css?v=20260720a" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='8' y='8' width='16' height='16' rx='3' transform='rotate(45 16 16)' fill='%236fb9ff'/></svg>" />
 <style>
   /* ── search / empty state ─────────────────────────────── */
   .search-wrap{display:flex;gap:8px;align-items:center;max-width:520px}
@@ -56,27 +57,39 @@
 <body>
 
 <header>
-  <div class="brand">
-    <a href="/" class="mark" style="text-decoration:none">lighter</a>
-    <span class="sub">Watch</span>
-  </div>
-  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-    <a href="/traders" class="nav-pill">← traders</a>
-    <a id="explorerLink" href="/explorer" class="nav-pill">explorer ↗</a>
+  <a class="brand" href="/">
+    <span class="glyph"></span>
+    <span class="mark">lighter</span>
+    <span class="sub">cockpit</span>
+  </a>
+  <nav style="display:flex;gap:6px">
+    <a href="/" class="nav-pill-hdr">Overview</a>
+    <a href="/lit" class="nav-pill-hdr">LIT</a>
+    <a id="explorerLink" href="/explorer" class="nav-pill-hdr">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr here">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
+  </nav>
+  <div class="hdr-nav-mobile">
+    <a href="/" class="nav-pill-hdr">Overview</a>
+    <a href="/lit" class="nav-pill-hdr">LIT</a>
+    <a href="/explorer" class="nav-pill-hdr">Explorer</a>
+    <a href="/traders" class="nav-pill-hdr here">Traders</a>
+    <a href="/watchlist" class="nav-pill-hdr">Watchlist</a>
   </div>
 </header>
 
 <!-- empty state: no ?q= param -->
-<section id="promptSection" style="padding:60px 0;display:none">
-  <div style="max-width:560px;margin:0 auto;padding:0 20px">
-    <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:8px">Watch an account live</div>
-    <div class="search-wrap">
+<section id="promptSection" style="display:none;align-items:center;justify-content:center;min-height:calc(100vh - 200px);padding:40px 20px">
+  <div class="card" style="max-width:480px;width:100%;padding:30px 32px;text-align:center">
+    <div class="section-lbl">Watch an account live</div>
+    <div class="hero-sub" style="font-size:13px;margin:2px 0 18px">Spectate a trader's live positions against the price chart</div>
+    <div class="search-wrap" style="max-width:100%;margin:0 auto">
       <input id="watchInput" class="search-input" type="text"
         placeholder="Account # (e.g. 8913) or 0x wallet address" autocomplete="off" spellcheck="false" />
       <button id="watchBtn" class="search-btn">Watch</button>
     </div>
-    <div style="font-size:10px;color:var(--ink-faint);margin-top:6px">
-      Spectate a trader's live positions against the price chart — hl.eco MLM-mode style.
+    <div style="font-size:10px;color:var(--ink-faint);margin-top:10px">
+      hl.eco MLM-mode style — live positions, entry &amp; liquidation lines overlaid on the price chart.
     </div>
   </div>
 </section>
@@ -147,6 +160,6 @@
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/watch.js?v=20260719a"></script>
+<script type="module" src="/static/watch.js?v=20260720a"></script>
 </body>
 </html>
