@@ -9,6 +9,7 @@ Every COLLECT_INTERVAL seconds:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from app.db import (
     fetch_lit_stats,
     mark_backfilled,
     prune_old,
+    upsert_account_snapshot,
     write_history,
     write_lit_trades,
 )
@@ -359,6 +361,7 @@ async def backfill_account_histories() -> dict[str, int]:
                 data = await client.account(by="index", value=str(account_id))
                 addr = data.get("l1_address", "")
             except Exception:
+                data = None
                 addr = ""
 
             if addr:
@@ -366,6 +369,19 @@ async def backfill_account_histories() -> dict[str, int]:
                 new_trades += n
             else:
                 n = 0
+
+            # Free enrichment: `data` (the full /account response) is already fetched
+            # above for its l1_address — persist it as an account snapshot too so this
+            # backfill also feeds LIT-holder coverage, at zero extra API cost.
+            if data:
+                await upsert_account_snapshot(
+                    account_index=account_id,
+                    l1_address=addr,
+                    ts=int(time.time()),
+                    collateral=_num(data.get("collateral")),
+                    total_asset_value=_num(data.get("total_asset_value")),
+                    payload=json.dumps(data),
+                )
 
             await mark_backfilled(account_id, addr or "unknown", n)
             processed += 1

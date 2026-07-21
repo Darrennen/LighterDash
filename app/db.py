@@ -770,6 +770,26 @@ async def fetch_top_trade_accounts(hours: int = 24, limit: int = 150) -> list[in
     return [int(r[0]) for r in rows if r[0]]
 
 
+async def fetch_top_lit_trade_accounts(limit: int = 300) -> list[int]:
+    """Top unique account indexes by all-time LIT USD volume (buyer + seller side),
+    sourced from the lit_trades ledger — the candidate pool for LIT-holder balance
+    scanning (distinct from fetch_top_trade_accounts, which ranks by all-market
+    volume over a recent window for the Traders leaderboard)."""
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            f"""SELECT account_index, SUM(usd) AS vol FROM (
+                 SELECT buyer_id AS account_index, usd FROM lit_trades
+                 WHERE buyer_id > 0 AND buyer_id {_SYS_NOT_IN}
+                 UNION ALL
+                 SELECT seller_id AS account_index, usd FROM lit_trades
+                 WHERE seller_id > 0 AND seller_id {_SYS_NOT_IN}
+               ) GROUP BY account_index ORDER BY vol DESC LIMIT ?""",
+            (limit,),
+        )
+        rows = await cur.fetchall()
+    return [int(r[0]) for r in rows if r[0]]
+
+
 async def upsert_account_snapshot(
     account_index: int, l1_address: str, ts: int,
     collateral: float, total_asset_value: float, payload: str,

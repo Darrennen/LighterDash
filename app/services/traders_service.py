@@ -19,6 +19,7 @@ from app.db import (
     fetch_leaderboard,
     fetch_pnl_cache,
     fetch_snapshot_ages,
+    fetch_top_lit_trade_accounts,
     fetch_top_trade_accounts,
     prune_all_trades,
     upsert_account_snapshot,
@@ -45,9 +46,18 @@ _POSITION_CONCURRENCY = 4
 _TRADES_CONCURRENCY = 8  # cap concurrent recentTrades calls — the upstream WAF
                          # blocks bursts above ~30 simultaneous requests
 
+# LIT-holder coverage scan: a separate, much slower-cadence sibling to the position
+# scan above. LIT balances don't move nearly as fast as trading positions, so a
+# 12h staleness window is plenty — and keeping this fully independent (own pool,
+# own schedule) avoids compounding onto the same 4-minute burst that _scan_positions
+# already uses (that cadence is tuned/hard-won for the Traders leaderboard).
+_TOP_N_LIT_ACCOUNTS = 300
+_HOLDER_STALE_SECS = 12 * 3600
+
 _TICK_SECS = 10
 _TRADES_SWEEP_SECS = 60
 _POSITIONS_SCAN_SECS = 240
+_HOLDER_SCAN_SECS = 3600
 _MARKET_META_TTL = 300
 _PRUNE_SECS = 86400
 
@@ -56,12 +66,14 @@ _last_market_meta_refresh = 0.0
 _last_trades_top = 0.0
 _last_trades_sweep = 0.0
 _last_positions_scan = 0.0
+_last_holder_scan = 0.0
 _last_prune = 0.0
 
 status: dict[str, Any] = {
     "last_tick": 0,
     "trades_ingested": 0,
     "accounts_scanned": 0,
+    "holders_scanned": 0,
     "last_error": None,
     "started_at": 0,
 }
@@ -176,15 +188,60 @@ async def _scan_positions() -> int:
     return scanned
 
 
+async def _scan_lit_holders() -> int:
+    """Balance-check the top LIT traders (by all-time lit_trades volume) so the
+    /holders page's account_snapshots coverage grows beyond the Traders
+    leaderboard's incidental overlap. Fully separate pool/cadence from
+    _scan_positions — see module docstring comment above _TOP_N_LIT_ACCOUNTS."""
+    top_accounts = await fetch_top_lit_trade_accounts(limit=_TOP_N_LIT_ACCOUNTS)
+    if not top_accounts:
+        return 0
+    ages = await fetch_snapshot_ages(top_accounts)
+    now = time.time()
+    pending = [aid for aid in top_accounts if now - ages.get(aid, 0) >= _HOLDER_STALE_SECS]
+    if not pending:
+        return 0
+
+    sem = asyncio.Semaphore(_POSITION_CONCURRENCY)
+    scanned = 0
+
+    async def _scan_one(account_index: int) -> None:
+        nonlocal scanned
+        async with sem:
+            try:
+                data = await client.account(by="index", value=str(account_index))
+            except Exception:
+                return
+            await asyncio.sleep(0.05)
+            if not data:
+                return
+            await upsert_account_snapshot(
+                account_index=account_index,
+                l1_address=data.get("l1_address", ""),
+                ts=int(time.time()),
+                collateral=_num(data.get("collateral")),
+                total_asset_value=_num(data.get("total_asset_value")),
+                payload=json.dumps(data),
+            )
+            scanned += 1
+
+    await asyncio.gather(*(_scan_one(aid) for aid in pending[:35]))  # cap per run, mirrors
+    # backfill_account_histories()'s pending[:30] pattern — 35 chosen as a similarly
+    # modest per-tick batch for this hourly-cadence scan
+    return scanned
+
+
 async def ingest_loop() -> None:
     """Continuously runs off the FastAPI lifespan (VPS deploy only). Never raises."""
-    global _last_trades_top, _last_trades_sweep, _last_positions_scan, _last_prune
+    global _last_trades_top, _last_trades_sweep, _last_positions_scan, _last_holder_scan, _last_prune
     status["started_at"] = int(time.time())
-    # Stagger the first tick so the top-market poll, the remaining-market sweep, and
-    # the position scan don't all fire concurrently on startup (upstream WAF blocks bursts).
+    # Stagger the first tick so the top-market poll, the remaining-market sweep, the
+    # position scan, and the holder scan don't all fire concurrently on startup
+    # (upstream WAF blocks bursts).
     now0 = time.time()
     _last_trades_sweep = now0
     _last_positions_scan = now0
+    _last_holder_scan = now0
     _last_prune = now0
     while True:
         try:
@@ -210,6 +267,11 @@ async def ingest_loop() -> None:
                 n = await _scan_positions()
                 status["accounts_scanned"] += n
 
+            if now - _last_holder_scan >= _HOLDER_SCAN_SECS:
+                _last_holder_scan = now
+                n = await _scan_lit_holders()
+                status["holders_scanned"] += n
+
             if now - _last_prune >= _PRUNE_SECS:
                 _last_prune = now
                 await prune_all_trades(max_age_days=8)
@@ -233,6 +295,7 @@ async def get_status() -> dict[str, Any]:
         "last_tick": status.get("last_tick", 0),
         "trades_ingested": status.get("trades_ingested", 0),
         "accounts_scanned": status.get("accounts_scanned", 0),
+        "holders_scanned": status.get("holders_scanned", 0),
         "last_error": status.get("last_error"),
         "all_trades_count": db_stats["all_trades_count"],
         "account_snapshots_count": db_stats["account_snapshots_count"],
