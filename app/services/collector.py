@@ -126,7 +126,6 @@ def _normalise_trade(raw: dict, market: dict) -> dict[str, Any] | None:
         "usd": price * size,
         "ts": ts_ms,
         "side": "buy" if taker_buy else "sell",
-        "is_liq": bool(raw.get("is_liquidation") or raw.get("liquidation")),
     }
 
 

@@ -249,19 +249,13 @@ function renderMovers() {
 }
 
 function renderLiqs() {
-  const liqs = state.trades.filter(t => t.is_liq).slice(0, 50);
-  const totalUsd = liqs.reduce((s, t) => s + t.usd, 0);
-  $('#liqHero').textContent = liqs.length ? fmtUsd(totalUsd) : '$0';
-  $('#liqSub').textContent = liqs.length
-    ? `${liqs.length} events · last 500 trades sample`
-    : 'none in last 500 trades sample';
-  $('#liqFeed').innerHTML = liqs.slice(0, 5).map(t => `
-    <div style="display:flex;gap:8px;align-items:center">
-      <span style="color:var(--ink-faint)">${fmtTime(t.ts)}</span>
-      <span class="sym">${t.symbol}</span>
-      <span class="pill ${t.side}" style="font-size:9px">${t.side}</span>
-      <span class="num down" style="margin-left:auto;font-variant-numeric:tabular-nums">${fmtUsd(t.usd)}</span>
-    </div>`).join('');
+  // Lighter's public trade API carries no liquidation flag (checked 300 real
+  // trades across 3 markets — every one is type "trade", no is_liquidation
+  // field exists anywhere). This can never be computed from current data;
+  // show that honestly instead of a fake "$0 confirmed clean" reading.
+  $('#liqHero').textContent = '—';
+  $('#liqSub').textContent = "not exposed by Lighter's public API";
+  $('#liqFeed').innerHTML = '';
 }
 
 // ── chart hover: crosshair + tooltip ─────────────────────────
