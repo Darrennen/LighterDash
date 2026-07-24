@@ -15,6 +15,9 @@
   .acct-link:hover{color:var(--accent)}
   .watch-link{margin-left:8px;color:var(--ink-faint);font-size:9px;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;border:1px solid var(--line-2);border-radius:2px;padding:1px 5px;transition:all .15s}
   .watch-link:hover{color:var(--accent);border-color:var(--accent)}
+  /* only 4 KPI tiles on this page (whale+mega only) vs. the shared 6-col default */
+  .kpis-4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:1200px){.kpis-4{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
@@ -48,13 +51,11 @@
   </div>
 </header>
 
-<!-- KPI strip -->
-<section class="kpis">
+<!-- KPI strip — whale+mega tier only, matches what's actually tracked -->
+<section class="kpis kpis-4">
   <div class="kpi"><div class="lbl">Tracked Holders</div><div class="val" id="kpi-holders">—</div><div class="sub" id="kpi-holders-sub">&nbsp;</div></div>
-  <div class="kpi"><div class="lbl">Retail ≥100 LIT</div><div class="val" id="kpi-retail">—</div><div class="sub">≈ ≥$215</div></div>
-  <div class="kpi"><div class="lbl">Whales ≥10K LIT</div><div class="val" id="kpi-whales">—</div><div class="sub">≈ ≥$21.5K</div></div>
+  <div class="kpi"><div class="lbl">Whales ≥100K LIT</div><div class="val" id="kpi-whales">—</div><div class="sub">≈ ≥$215K</div></div>
   <div class="kpi"><div class="lbl">Mega ≥1M LIT</div><div class="val" id="kpi-mega">—</div><div class="sub">≈ ≥$2.15M</div></div>
-  <div class="kpi"><div class="lbl">Whale Share</div><div class="val" id="kpi-whaleshare">—</div><div class="sub">of tracked LIT held by whales</div></div>
   <div class="kpi"><div class="lbl">Tracked LIT</div><div class="val" id="kpi-tracked">—</div><div class="sub" id="kpi-tracked-sub">&nbsp;</div></div>
 </section>
 
@@ -107,7 +108,7 @@
       <span class="card-title">Holder Pyramid <span class="count">wallet count by balance band</span></span>
     </div>
     <div id="pyramidChart" style="min-height:160px"></div>
-    <div style="font-size:10px;color:var(--ink-faint);margin-top:8px">Only high-volume traded accounts are tracked, so upper bands can outnumber lower ones.</div>
+    <div style="font-size:10px;color:var(--ink-faint);margin-top:8px">Smaller tiers (Dolphin/Fish/Shrimp) aren't shown — only Whale+ balances are kept fresh, so this only tracks the top of the distribution.</div>
   </section>
 
 </main>
@@ -115,7 +116,7 @@
 <footer>
   <span>backend · <a href="/docs" target="_blank">/docs</a> · <a href="/api/holders/summary" target="_blank">/api/holders/summary</a></span>
   <span style="color:var(--ink-faint)">·</span>
-  <span style="color:var(--ink-faint)">holder counts cover only the tracked/scanned account set, not the full LIT holder base — no staking pool data</span>
+  <span style="color:var(--ink-faint)">shows Whale+ tier only (≥100K LIT) among tracked/scanned accounts, not the full LIT holder base — no staking pool data</span>
   <div class="spacer"></div>
   <span>data · <a href="https://lighter.xyz" target="_blank" style="color:var(--ink-dim)">lighter.xyz</a></span>
   <span style="color:var(--ink-faint)">·</span>

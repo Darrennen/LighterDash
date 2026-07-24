@@ -71,15 +71,13 @@ function tierPill(tier, label) {
 function renderStats(d) {
   if (!d) return;
   $('#kpi-holders').textContent = fmtNum(d.holders_count);
-  $('#kpi-holders-sub').textContent = `≥1 LIT · of ${fmtNum(d.accounts_scanned)} accounts scanned`;
+  $('#kpi-holders-sub').textContent = `≥100K LIT · of ${fmtNum(d.accounts_scanned)} accounts scanned`;
 
-  $('#kpi-retail').textContent = fmtNum(d.stats?.retail_count);
   $('#kpi-whales').textContent = fmtNum(d.stats?.whale_count);
   $('#kpi-mega').textContent = fmtNum(d.stats?.mega_count);
-  $('#kpi-whaleshare').textContent = fmtPct1(d.stats?.whale_share_pct);
 
   $('#kpi-tracked').textContent = fmtLit(d.tracked_lit_total);
-  $('#kpi-tracked-sub').textContent = `≈ ${fmtUsd(d.tracked_usd_total)} · known holders only`;
+  $('#kpi-tracked-sub').textContent = `≈ ${fmtUsd(d.tracked_usd_total)} · whale+mega only`;
 }
 
 // ── Top LIT Holders table ───────────────────────────────────
@@ -87,7 +85,7 @@ function renderHolders(d) {
   const tbody = $('#holdersBody');
   const holders = d?.holders || [];
   $('#holdersCaption').textContent = d
-    ? `${fmtNum(d.holders_count)} known holders (≥1 LIT) among ${fmtNum(d.accounts_scanned)} tracked accounts · ${fmtNum(d.nonzero_count)} incl. dust`
+    ? `${fmtNum(d.holders_count)} whale+mega holders (≥100K LIT) among ${fmtNum(d.accounts_scanned)} accounts scanned · smaller balances tracked once, not kept fresh`
     : '';
 
   if (!d) {

@@ -417,6 +417,11 @@ def _holder_tier(bal: float) -> str:
 
 
 async def get_holders(limit: int = 100) -> dict[str, Any]:
+    """Whale+Mega tier LIT holders only (>= _WHALE_MIN_LIT) — matches what
+    _scan_lit_holders actually maintains ongoing coverage for. Smaller
+    balances are still visible in account_snapshots (checked once, on
+    discovery) but are deliberately excluded here since we don't keep them
+    fresh; showing them would imply active tracking that isn't happening."""
     rows = await fetch_account_snapshots(limit=500)
     accounts_scanned = len(rows)
 
@@ -446,7 +451,7 @@ async def get_holders(limit: int = 100) -> dict[str, Any]:
         if bal is None or bal <= 0:
             continue
         nonzero_count += 1
-        if bal < 1:
+        if bal < _WHALE_MIN_LIT:
             continue
         holders.append({
             "account_index": row["account_index"],
@@ -466,6 +471,8 @@ async def get_holders(limit: int = 100) -> dict[str, Any]:
 
     tier_breakdown = []
     for key, label, mn, mx in _HOLDER_TIERS:
+        if mn < _WHALE_MIN_LIT:
+            continue  # dolphin/fish/shrimp — not tracked, not shown
         members = [h for h in holders if h["tier"] == key]
         lit_sum = sum(h["balance_lit"] for h in members)
         tier_breakdown.append({
@@ -478,11 +485,8 @@ async def get_holders(limit: int = 100) -> dict[str, Any]:
             "share_pct": lit_sum / tracked_lit_total * 100 if tracked_lit_total else 0.0,
         })
 
-    retail_count = sum(1 for h in holders if h["balance_lit"] >= 100)
-    whale_count = sum(1 for h in holders if h["balance_lit"] >= 10_000)
-    mega_count = sum(1 for h in holders if h["balance_lit"] >= 1_000_000)
-    whale_lit = sum(h["balance_lit"] for h in holders if h["balance_lit"] >= 10_000)
-    whale_share_pct = whale_lit / tracked_lit_total * 100 if tracked_lit_total else 0.0
+    whale_count = sum(1 for h in holders if h["tier"] == "whale")
+    mega_count = sum(1 for h in holders if h["tier"] == "mega")
 
     return {
         "updated_at": int(time.time()),
@@ -493,10 +497,8 @@ async def get_holders(limit: int = 100) -> dict[str, Any]:
         "tracked_lit_total": tracked_lit_total,
         "tracked_usd_total": tracked_lit_total * lit_price if lit_price else None,
         "stats": {
-            "retail_count": retail_count,
             "whale_count": whale_count,
             "mega_count": mega_count,
-            "whale_share_pct": whale_share_pct,
         },
         "tier_breakdown": tier_breakdown,
         "holders": holders[:limit],
