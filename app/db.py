@@ -1,6 +1,7 @@
 """Async SQLite persistence: market history + LIT trade ledger."""
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any, Iterable
@@ -822,6 +823,36 @@ async def fetch_snapshot_ages(account_indexes: list[int]) -> dict[int, int]:
         )
         rows = await cur.fetchall()
     return {int(r[0]): int(r[1]) for r in rows}
+
+
+async def fetch_lit_balances(account_indexes: list[int]) -> dict[int, float]:
+    """Map account_index -> last known LIT balance, for accounts already snapshotted.
+    Absent from the result means never scanned (unknown, not zero)."""
+    if not account_indexes:
+        return {}
+    placeholders = ",".join("?" for _ in account_indexes)
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            f"SELECT account_index, payload FROM account_snapshots WHERE account_index IN ({placeholders})",
+            account_indexes,
+        )
+        rows = await cur.fetchall()
+    out: dict[int, float] = {}
+    for account_index, payload in rows:
+        try:
+            data = json.loads(payload)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        bal = 0.0
+        for a in data.get("assets") or []:
+            if a.get("symbol") == "LIT":
+                try:
+                    bal = float(a.get("balance") or 0)
+                except (TypeError, ValueError):
+                    bal = 0.0
+                break
+        out[int(account_index)] = bal
+    return out
 
 
 async def fetch_account_snapshots(limit: int = 500) -> list[dict[str, Any]]:

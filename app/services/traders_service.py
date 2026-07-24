@@ -17,6 +17,7 @@ from app.db import (
     fetch_account_snapshots,
     fetch_all_trades_status,
     fetch_leaderboard,
+    fetch_lit_balances,
     fetch_pnl_cache,
     fetch_snapshot_ages,
     fetch_top_lit_trade_accounts,
@@ -53,6 +54,8 @@ _TRADES_CONCURRENCY = 8  # cap concurrent recentTrades calls — the upstream WA
 # already uses (that cadence is tuned/hard-won for the Traders leaderboard).
 _TOP_N_LIT_ACCOUNTS = 300
 _HOLDER_STALE_SECS = 12 * 3600
+_WHALE_MIN_LIT = 100_000  # only keep refreshing accounts at/above Whale tier;
+                          # confirmed-smaller holders are checked once, then left alone
 
 _TICK_SECS = 10
 _TRADES_SWEEP_SECS = 60
@@ -192,13 +195,26 @@ async def _scan_lit_holders() -> int:
     """Balance-check the top LIT traders (by all-time lit_trades volume) so the
     /holders page's account_snapshots coverage grows beyond the Traders
     leaderboard's incidental overlap. Fully separate pool/cadence from
-    _scan_positions — see module docstring comment above _TOP_N_LIT_ACCOUNTS."""
+    _scan_positions — see module docstring comment above _TOP_N_LIT_ACCOUNTS.
+
+    Only maintains ongoing coverage for whale-tier+ holders (>= _WHALE_MIN_LIT):
+    an account confirmed below that threshold is excluded from all future
+    scans here — no point spending API budget refreshing known-small holders
+    every cycle. Never-scanned accounts are still checked once (that's how new
+    whales get discovered); only a CONFIRMED sub-whale balance skips it."""
     top_accounts = await fetch_top_lit_trade_accounts(limit=_TOP_N_LIT_ACCOUNTS)
     if not top_accounts:
         return 0
-    ages = await fetch_snapshot_ages(top_accounts)
+
+    known_balances = await fetch_lit_balances(top_accounts)
+    candidates = [
+        aid for aid in top_accounts
+        if aid not in known_balances or known_balances[aid] >= _WHALE_MIN_LIT
+    ]
+
+    ages = await fetch_snapshot_ages(candidates)
     now = time.time()
-    pending = [aid for aid in top_accounts if now - ages.get(aid, 0) >= _HOLDER_STALE_SECS]
+    pending = [aid for aid in candidates if now - ages.get(aid, 0) >= _HOLDER_STALE_SECS]
     if not pending:
         return 0
 
