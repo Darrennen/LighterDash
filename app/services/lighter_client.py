@@ -138,6 +138,41 @@ class LighterClient:
             log.debug("accounts_by_l1(%s) failed: %s", address, e)
             return {}
 
+    async def api_keys(self, account_index: int) -> list[dict]:
+        """Every API key registered to an account. Public — no auth needed.
+
+        `api_key_index=255` is the documented "all keys" sentinel. Each key
+        carries a nonce and a last-transaction time, which together fingerprint
+        how the account trades (see `_classify_keys` in routes/explorer.py).
+        """
+        try:
+            j = await self._get(
+                "/apikeys", params={"account_index": account_index, "api_key_index": 255}
+            )
+        except (httpx.HTTPError, UpstreamUnavailable) as e:
+            log.debug("api_keys(%s) failed: %s", account_index, e)
+            return []
+        return j.get("api_keys") or []
+
+    async def pnl_leaderboard(
+        self, search: str = "", limit: int = 1, time_window: str = ""
+    ) -> dict:
+        """Exchange-reported PnL ranking. Public, and covers ~96K accounts.
+
+        `search` resolves a single L1 address to its own rank, so this works for
+        any trader, not just the top of the board.
+        """
+        params: dict[str, Any] = {"limit": limit}
+        if search:
+            params["search"] = search
+        if time_window:
+            params["time_window"] = time_window
+        try:
+            return await self._get("/pnlLeaderboard", params=params)
+        except (httpx.HTTPError, UpstreamUnavailable) as e:
+            log.debug("pnl_leaderboard(%s) failed: %s", search, e)
+            return {}
+
     async def candles(
         self, market_id: int, resolution: str = "1h", count: int = 24
     ) -> list[dict]:

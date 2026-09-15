@@ -1,6 +1,7 @@
 """Lighter account explorer endpoint."""
 from __future__ import annotations
 
+import asyncio
 import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -158,3 +159,116 @@ async def account_lookup(
         "assets": assets,
         "lit_staking": lit_staking,
     }
+
+
+# ── counterparty profile ──────────────────────────────────────────────
+# Two public signals the page never showed: how the account signs its
+# transactions, and where the exchange itself ranks its PnL.
+
+# A nonce this close to its own last-transaction clock is a millisecond
+# timestamp, not a counter — some clients set it that way to avoid nonce
+# collisions across parallel workers. Summing those as "transactions" is
+# meaningless, so they must be detected before any count is reported.
+_TS_NONCE_DRIFT_SECS = 600
+
+
+def _classify_keys(keys: list[dict]) -> dict:
+    """Fingerprint an account's signing setup from its API keys.
+
+    Measured on live accounts 2026-09-15: a retail account runs 1 key with a
+    small counter nonce; a market maker runs 200+ keys firing within the same
+    second (726722 had 254 of the 255 available slots in use).
+    """
+    active = [k for k in keys if (k.get("nonce") or 0) > 0]
+    if not active:
+        return {"label": "unused", "active_keys": 0, "total_keys": len(keys),
+                "counter_tx": 0, "timestamp_keys": 0, "last_active_ts": None,
+                "oldest_key_last_tx": None, "keys": []}
+
+    detail, counter_tx, ts_keys = [], 0, 0
+    for k in active:
+        nonce = k.get("nonce") or 0
+        tx_us = k.get("transaction_time") or 0
+        is_ts = tx_us > 0 and abs(nonce / 1000 - tx_us / 1e6) < _TS_NONCE_DRIFT_SECS
+        if is_ts:
+            ts_keys += 1
+        else:
+            counter_tx += nonce
+        detail.append({
+            "index": k.get("api_key_index"),
+            "nonce": nonce,
+            "nonce_kind": "timestamp" if is_ts else "counter",
+            # transaction_time is microseconds; the rest of the app uses ms
+            "last_tx_ms": int(tx_us / 1000) if tx_us else None,
+        })
+
+    times = [d["last_tx_ms"] for d in detail if d["last_tx_ms"]]
+    max_counter = max((d["nonce"] for d in detail if d["nonce_kind"] == "counter"), default=0)
+
+    if len(active) >= 50:
+        label = "market maker"        # parallel signer fleet
+    elif len(active) >= 2 or ts_keys or max_counter >= 10_000:
+        label = "algo"
+    else:
+        label = "manual"
+
+    detail.sort(key=lambda d: d["last_tx_ms"] or 0, reverse=True)
+    return {
+        "label": label,
+        "active_keys": len(active),
+        "total_keys": len(keys),
+        "counter_tx": counter_tx,        # only counter-style keys, never timestamps
+        "timestamp_keys": ts_keys,
+        "last_active_ts": max(times) if times else None,
+        # The OLDEST key's most recent transaction — a floor on how long the
+        # account has been operating, NOT the date it started.
+        "oldest_key_last_tx": min(times) if times else None,
+        "keys": detail[:8],
+    }
+
+
+@router.get("/profile")
+async def account_profile(
+    request: Request,
+    account_index: int = Query(..., ge=0),
+    address: str = Query("", description="L1 address, for the PnL rank lookup"),
+):
+    """Signing fingerprint + exchange-reported PnL rank for one account."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not explorer_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests — please slow down")
+    if address and not _ETH_ADDR_RE.match(address):
+        raise HTTPException(status_code=400, detail="Invalid Ethereum address format")
+
+    keys, board = await asyncio.gather(
+        client.api_keys(account_index),
+        client.pnl_leaderboard(search=address, limit=1) if address else _empty(),
+        return_exceptions=True,
+    )
+    if isinstance(keys, Exception):
+        keys = []
+    if isinstance(board, Exception):
+        board = {}
+
+    entry = (board.get("entries") or [{}])[0] if board else {}
+    total = board.get("total") if board else None
+    rank = entry.get("rank")
+    return {
+        "account_index": account_index,
+        "signing": _classify_keys(keys),
+        "leaderboard": {
+            "rank": rank,
+            "total": total,
+            # Where they sit in the whole field — a rank with no denominator
+            # says nothing.
+            "percentile": round((1 - rank / total) * 100, 2) if rank and total else None,
+            "pnl": entry.get("pnl"),
+            "roi": entry.get("roi"),
+            "volume": entry.get("volume"),
+            "account_value": entry.get("account_value"),
+        } if entry else None,
+    }
+
+
+async def _empty() -> dict:
+    return {}

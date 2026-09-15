@@ -430,3 +430,21 @@ footer .spacer{margin-left:auto}
   .cov-gaps{margin-left:0;width:100%}
   .headline{padding:10px 12px 0;font-size:13px}
 }
+
+
+/* ── Explorer counterparty profile ─────────────────────────────
+   Trader type is an identity claim, so it sits beside the name, not in the
+   stat row. Colour encodes only how mechanised the account is. */
+.type-chip{
+  font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  padding:3px 8px;border-radius:3px;border:1px solid transparent;white-space:nowrap;
+}
+.type-chip[data-t="market maker"]{color:var(--amber);border-color:var(--amber);background:rgba(240,180,80,.10)}
+.type-chip[data-t="algo"]        {color:var(--accent);border-color:var(--accent);background:rgba(111,185,255,.10)}
+.type-chip[data-t="manual"]      {color:var(--ink-dim);border-color:var(--line-2);background:var(--line)}
+.type-chip[data-t="unused"]      {color:var(--ink-faint);border-color:var(--line-2)}
+/* Marks a figure Lighter reports itself, as opposed to one we reconstruct. */
+.prov-src{
+  font-family:var(--font-mono);font-size:8px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--accent);background:rgba(111,185,255,.12);padding:1px 4px;border-radius:2px;margin-left:4px;
+}

@@ -972,12 +972,81 @@ function renderLitFlow(data) {
 
 // ── search ────────────────────────────────────────────────────
 
+// ── counterparty profile ──────────────────────────────────────
+// Two things the reconstructed stats cannot tell you: how the account signs
+// its transactions, and what Lighter itself says its PnL is.
+
+const _ago = ms => {
+  if (!ms) return '—';
+  const m = (Date.now() - ms) / 60000;
+  if (m < 60)   return Math.round(m) + 'm ago';
+  if (m < 1440) return (m / 60).toFixed(1) + 'h ago';
+  return (m / 1440).toFixed(1) + 'd ago';
+};
+
+async function loadProfile(accountIndex, address) {
+  const strip = $('#profileStrip'), chip = $('#acctType');
+  try {
+    const q = `/api/explorer/profile?account_index=${accountIndex}`
+            + (address ? `&address=${encodeURIComponent(address)}` : '');
+    const r = await fetch(q);
+    if (!r.ok) return;
+    const d = await r.json();
+    const g = d.signing || {};
+
+    chip.textContent = g.label || '—';
+    chip.dataset.t = g.label || '';
+    chip.style.display = '';
+
+    $('#profType').textContent  = g.label || '—';
+    $('#profKeys').textContent  = g.active_keys != null
+      ? g.active_keys + (g.total_keys > g.active_keys ? ` of ${g.total_keys}` : '')
+      : '—';
+    // Only counter-style nonces are transaction counts. Timestamp nonces are
+    // clocks, so they are reported as a key count, never summed into totals.
+    $('#profTx').textContent = g.counter_tx
+      ? Number(g.counter_tx).toLocaleString()
+      : (g.timestamp_keys ? 'n/a' : '—');
+    $('#profSeen').textContent = _ago(g.last_active_ts);
+
+    const lb = d.leaderboard;
+    if (lb && lb.rank) {
+      $('#profRank').innerHTML = `#${Number(lb.rank).toLocaleString()}`
+        + `<span style="color:var(--ink-faint);font-size:11px"> / ${Number(lb.total).toLocaleString()}</span>`;
+      $('#profPnl').textContent = fmtUsd(lb.pnl);
+      $('#profPnl').style.color = lb.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    } else {
+      $('#profRank').textContent = address ? 'unranked' : '—';
+      $('#profPnl').textContent = '—';
+    }
+
+    const bits = [];
+    if (g.timestamp_keys)
+      bits.push(`${g.timestamp_keys} key${g.timestamp_keys > 1 ? 's' : ''} use a timestamp nonce (a clock, not a counter) — those transactions are not countable`);
+    if (g.active_keys >= 50)
+      bits.push(`${g.active_keys} keys signing in parallel — a market-maker signer fleet`);
+    if (g.oldest_key_last_tx)
+      bits.push(`oldest key last fired ${fmtMYT(g.oldest_key_last_tx)}, so the account has run at least that long`);
+    if (lb && lb.percentile != null)
+      // percentile = share of ranked accounts this one beats. Stated plainly,
+      // because "top 99.86%" is a nonsense way to describe a bottom-ranked book.
+      bits.push(`outranks ${lb.percentile.toFixed(2)}% of ${Number(lb.total).toLocaleString()} ranked accounts by PnL`);
+    $('#profNote').textContent = bits.join(' · ');
+
+    strip.style.display = '';
+  } catch (e) {
+    console.warn('profile failed:', e.message);
+  }
+}
+
 async function doSearch() {
   const query = $('#searchInput').value.trim();
   if (!query) return;
 
   $('#errorBox').style.display = 'none';
   $('#results').style.display = 'none';
+  $('#profileStrip').style.display = 'none';
+  $('#acctType').style.display = 'none';
   $('#loadingBox').style.display = 'block';
   $('#searchBtn').disabled = true;
 
@@ -1003,6 +1072,7 @@ async function doSearch() {
     }
 
     renderAccount(data, priceMap);
+    loadProfile(data.account_index ?? data.index, data.l1_address || '');
 
     // switch to positions tab by default
     $$('.tab').forEach(t => t.classList.remove('active'));

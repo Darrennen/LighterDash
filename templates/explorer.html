@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/static/styles.css?v=20260915a" />
+<link rel="stylesheet" href="/static/styles.css?v=20260915b" />
 <style>
   .search-wrap{display:flex;gap:8px;align-items:center;max-width:560px}
   .search-input{flex:1;background:var(--bg);border:1px solid var(--line-2);border-radius:3px;padding:8px 14px;font-family:var(--font-mono);font-size:13px;color:var(--ink);outline:none;transition:border-color .15s}
@@ -104,8 +104,22 @@
           <a id="acctExtLink" class="ext-link" href="#" target="_blank">open on lighter ↗</a>
         </div>
       </div>
+      <span id="acctType" class="type-chip" style="display:none"></span>
       <div id="acctStatus" style="margin-left:auto"></div>
     </div>
+  </div>
+
+  <!-- counterparty profile: how the account signs, and where Lighter ranks it -->
+  <div id="profileStrip" style="display:none;background:var(--panel);border-bottom:1px solid var(--line);padding:12px 20px">
+    <div class="acct-card" style="margin-bottom:0">
+      <div><div class="card-lbl">Trader Type</div><div class="card-val" id="profType" style="font-size:14px">—</div></div>
+      <div><div class="card-lbl">API Keys</div><div class="card-val" id="profKeys" style="font-size:14px">—</div></div>
+      <div><div class="card-lbl">Signed Txs</div><div class="card-val" id="profTx" style="font-size:14px">—</div></div>
+      <div><div class="card-lbl">Last Active</div><div class="card-val" id="profSeen" style="font-size:14px">—</div></div>
+      <div><div class="card-lbl">PnL Rank <span class="prov-src">exchange</span></div><div class="card-val" id="profRank" style="font-size:14px">—</div></div>
+      <div><div class="card-lbl">Realised PnL <span class="prov-src">exchange</span></div><div class="card-val" id="profPnl" style="font-size:14px">—</div></div>
+    </div>
+    <div id="profNote" style="margin-top:8px;font-size:10px;color:var(--ink-faint)"></div>
   </div>
 
   <!-- trader profile hero: all-time PnL, win rate, streaks (est., from /api/traders/pnl) -->
@@ -345,6 +359,6 @@
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/explorer.js?v=20260720a"></script>
+<script type="module" src="/static/explorer.js?v=20260915a"></script>
 </body>
 </html>
