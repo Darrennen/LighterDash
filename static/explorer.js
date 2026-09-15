@@ -55,6 +55,33 @@ const fmtMYT = ts => {
 };
 const truncAddr = a => a ? a.slice(0, 6) + '…' + a.slice(-4) : '—';
 
+let _markets = null;          // market_id -> { symbol, market_type }
+let _marketsPromise = null;
+
+async function loadMarkets() {
+  if (_markets) return _markets;
+  if (!_marketsPromise) {
+    _marketsPromise = fetch('/api/markets')
+      .then(r => r.json())
+      .then(d => {
+        _markets = {};
+        for (const m of (d.markets || [])) {
+          _markets[m.market_id] = { symbol: m.symbol, type: m.market_type };
+        }
+        return _markets;
+      })
+      .catch(() => (_markets = {}));
+  }
+  return _marketsPromise;
+}
+
+// Falls back to the raw id rather than inventing a name for an unknown market.
+function mktName(id) {
+  const m = _markets && _markets[id];
+  if (!m) return `#${id}`;
+  return m.type === 'spot' ? `${m.symbol} SPOT` : `${m.symbol} PERP`;
+}
+
 let _currentAccountIndex = null;
 let _portfolioValue = 0;  // used by renderPositions for allocation bars
 
@@ -803,6 +830,7 @@ async function loadHistory(offset = 0) {
   }
 
   try {
+    await loadMarkets();
     const mq = _histMarket ? `&market_id=${_histMarket}` : '';
     const res = await fetch(
       `/api/explorer/history?address=${encodeURIComponent(_histAddress)}&account_index=${_histAccountIndex}&limit=${HIST_PAGE}&offset=${offset}${mq}`
@@ -819,8 +847,6 @@ async function loadHistory(offset = 0) {
       }
       return;
     }
-
-    const mktName = id => id === 120 ? 'LIT PERP' : id === 2049 ? 'LIT SPOT' : `#${id}`;
 
     tbody.innerHTML = trades.map(t => {
       const isBuy = t.taker_is_buyer === 1;
