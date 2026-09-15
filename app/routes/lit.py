@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.db import (
     fetch_backfill_status,
     fetch_lit_coverage,
+    fetch_lit_positions,
     fetch_lit_twap,
     fetch_lit_account_flow,
     fetch_lit_account_trades,
@@ -334,6 +335,19 @@ async def twap(
     return await fetch_lit_twap(
         window_ms=window_ms, min_usd=min_usd,
         min_trades=min_trades, market_id=_market_filter(market_id),
+    )
+
+
+@router.get("/positions")
+async def positions(
+    market_id: int = Query(120),
+    limit: int = Query(40, ge=1, le=200),
+    max_age_hours: int = Query(24, ge=1, le=720),
+):
+    """Largest known positions, reconstructed from the public trade stream."""
+    await _maybe_refresh()
+    return await fetch_lit_positions(
+        market_id=market_id, limit=limit, max_age_hours=max_age_hours
     )
 
 

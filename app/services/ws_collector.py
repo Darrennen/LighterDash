@@ -81,6 +81,37 @@ def _norm_ws_trade(raw: dict) -> dict[str, Any] | None:
     taker_is_buyer = (1 if mk else 0) if isinstance(mk, bool) else 2
 
     ts = raw.get("timestamp")
+
+    # The stream describes state in a taker/maker frame; the ledger stores
+    # accounts in a buyer/seller frame. is_maker_ask decides the mapping:
+    # maker on the ask side => the taker is the buyer, and vice versa.
+    # Getting this backwards would silently attribute one trader's position
+    # and leverage to their counterparty, so it is derived, never assumed.
+    if taker_is_buyer == 1:
+        buyer_side, seller_side = "taker", "maker"
+    elif taker_is_buyer == 0:
+        buyer_side, seller_side = "maker", "taker"
+    else:
+        buyer_side = seller_side = None   # side unknown — attribute nothing
+
+    def side_field(side: str | None, field: str) -> Any:
+        # NB: not named `state` — that is the module-level health dict.
+        return raw.get(f"{side}_{field}") if side else None
+
+    def num(v: Any) -> float | None:
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def integer(v: Any) -> int | None:
+        try:
+            return int(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
     return {
         "trade_id": int(trade_id),
         "market_id": int(market_id),
@@ -93,6 +124,20 @@ def _norm_ws_trade(raw: dict) -> dict[str, Any] | None:
         "taker_is_buyer": taker_is_buyer,
         # "trade" | "liquidation" | "deleverage" | "market-settlement"
         "trade_type": str(raw.get("type") or "trade"),
+
+        # Position state, stream-only and unbackfillable. `fee` is the fee for
+        # the WHOLE order and is repeated on each of its fills — never sum it
+        # across trade rows.
+        "buyer_pos_before":   num(side_field(buyer_side, "position_size_before")),
+        "buyer_entry_quote":  num(side_field(buyer_side, "entry_quote_before")),
+        "buyer_imf":      integer(side_field(buyer_side, "initial_margin_fraction_before")),
+        "buyer_fee":      integer(side_field(buyer_side, "fee")),
+        "buyer_client_id":  integer(raw.get("bid_client_id")),
+        "seller_pos_before":  num(side_field(seller_side, "position_size_before")),
+        "seller_entry_quote": num(side_field(seller_side, "entry_quote_before")),
+        "seller_imf":     integer(side_field(seller_side, "initial_margin_fraction_before")),
+        "seller_fee":     integer(side_field(seller_side, "fee")),
+        "seller_client_id": integer(raw.get("ask_client_id")),
     }
 
 

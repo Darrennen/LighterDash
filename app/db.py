@@ -93,6 +93,22 @@ CREATE TABLE IF NOT EXISTS account_pnl_cache (
 # only safe migration against the live 589K-row ledger, and it must stay idempotent.
 _MIGRATIONS = [
     ("lit_trades", "trade_type", "TEXT NOT NULL DEFAULT 'trade'"),
+    # Position state published on every public trade, for BOTH counterparties.
+    # These are stream-only — there is no REST endpoint to backfill them from,
+    # so anything not captured as it arrives is gone permanently.
+    # position_before is the account's size BEFORE this fill; entry_quote is its
+    # cost basis (entry price = entry_quote / |position_before|); imf is the
+    # initial margin fraction (leverage = 10000 / imf, verified 2000->5x, 3333->3x).
+    ("lit_trades", "buyer_pos_before",   "REAL"),
+    ("lit_trades", "buyer_entry_quote",  "REAL"),
+    ("lit_trades", "buyer_imf",          "INTEGER"),
+    ("lit_trades", "buyer_fee",          "INTEGER"),
+    ("lit_trades", "buyer_client_id",    "INTEGER"),
+    ("lit_trades", "seller_pos_before",  "REAL"),
+    ("lit_trades", "seller_entry_quote", "REAL"),
+    ("lit_trades", "seller_imf",         "INTEGER"),
+    ("lit_trades", "seller_fee",         "INTEGER"),
+    ("lit_trades", "seller_client_id",   "INTEGER"),
 ]
 
 
@@ -246,10 +262,13 @@ async def prune_old() -> None:
 async def write_lit_trades(trades: list[dict[str, Any]]) -> int:
     if not trades:
         return 0
+    cols = ("buyer_pos_before", "buyer_entry_quote", "buyer_imf", "buyer_fee",
+            "buyer_client_id", "seller_pos_before", "seller_entry_quote",
+            "seller_imf", "seller_fee", "seller_client_id")
     payload = [
         (t["trade_id"], t["market_id"], t["ts"], t["price"],
          t["size"], t["usd"], t["buyer_id"], t["seller_id"], t["taker_is_buyer"],
-         t.get("trade_type", "trade"))
+         t.get("trade_type", "trade"), *(t.get(c) for c in cols))
         for t in trades
     ]
     async with aiosqlite.connect(settings.DB_PATH) as db:
@@ -257,8 +276,11 @@ async def write_lit_trades(trades: list[dict[str, Any]]) -> int:
         await db.executemany(
             """INSERT OR IGNORE INTO lit_trades
                (trade_id, market_id, ts, price, size, usd,
-                buyer_id, seller_id, taker_is_buyer, trade_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                buyer_id, seller_id, taker_is_buyer, trade_type,
+                buyer_pos_before, buyer_entry_quote, buyer_imf, buyer_fee,
+                buyer_client_id, seller_pos_before, seller_entry_quote,
+                seller_imf, seller_fee, seller_client_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             payload,
         )
         await db.commit()
@@ -725,6 +747,83 @@ async def fetch_lit_twap(
         "window_ms": window_ms, "min_usd": min_usd,
         "min_trades": min_trades, "since_ts": since_ms,
     }
+
+
+async def fetch_lit_positions(
+    market_id: int = 120, limit: int = 40, max_age_hours: int = 24
+) -> dict[str, Any]:
+    """Reconstruct each account's latest known position from the trade stream.
+
+    Every public trade publishes both counterparties' position size, cost basis
+    and margin fraction as they stood BEFORE the fill. Taking each account's
+    most recent appearance and applying that fill gives its position AFTER —
+    with no auth and no account API.
+
+    It is a LAST-SEEN position, not a live one: an account that has not traded
+    since is reported at its last observed state, and `as_of` says when that
+    was. Accounts whose last fill predates the column migration have no state
+    and are excluded rather than shown as flat.
+    """
+    since_ms = int((time.time() - max_age_hours * 3600) * 1000)
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """
+            WITH sides AS (
+                SELECT buyer_id  AS account_id, ts, price, size AS delta,
+                       buyer_pos_before  AS pos_before,
+                       buyer_entry_quote AS entry_quote,
+                       buyer_imf         AS imf
+                FROM lit_trades
+                WHERE market_id = ? AND ts >= ? AND buyer_id > 0
+                  AND buyer_pos_before IS NOT NULL
+                UNION ALL
+                SELECT seller_id, ts, price, -size,
+                       seller_pos_before, seller_entry_quote, seller_imf
+                FROM lit_trades
+                WHERE market_id = ? AND ts >= ? AND seller_id > 0
+                  AND seller_pos_before IS NOT NULL
+            ),
+            ranked AS (
+                SELECT *, ROW_NUMBER() OVER (
+                           PARTITION BY account_id ORDER BY ts DESC) AS rn
+                FROM sides
+            )
+            SELECT account_id, ts, price, pos_before, pos_before + delta AS position,
+                   entry_quote, imf
+            FROM ranked WHERE rn = 1
+            ORDER BY ABS(pos_before + delta) DESC
+            LIMIT ?
+            """,
+            (market_id, since_ms, market_id, since_ms, limit),
+        )
+        rows = await cur.fetchall()
+
+    out = []
+    for acct, ts, price, pos_before, position, entry_quote, imf in rows:
+        if not position:
+            continue                      # flat after the fill — nothing to show
+        # Cost basis is published against the PRE-fill size, so it must be
+        # divided by pos_before, NOT by the updated position.
+        entry = abs(entry_quote / pos_before) if entry_quote and pos_before else None
+        out.append({
+            "account_id": acct,
+            "as_of": ts,
+            "position": position,
+            "position_before": pos_before,
+            "side": "long" if position > 0 else "short",
+            "last_price": price,
+            "entry_quote": entry_quote,
+            "entry_price": entry,
+            # Verified live: imf 2000 -> 5x, 3333 -> 3x.
+            "leverage": round(10000 / imf, 2) if imf else None,
+            "notional": abs(position) * price,
+            # Mark-to-market on the last observed print. Validated against
+            # Lighter's own /account for index 100833: entry 1.9480 and
+            # 5x leverage matched exactly.
+            "unrealized_pnl": (price - entry) * position if entry else None,
+        })
+    return {"market_id": market_id, "positions": out, "count": len(out),
+            "max_age_hours": max_age_hours}
 
 
 async def fetch_lit_stats() -> dict[str, Any]:
