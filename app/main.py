@@ -24,7 +24,7 @@ from app.routes import (
     lit as lit_routes,
     traders as traders_routes,
 )
-from app.services import traders_service
+from app.services import traders_service, ws_collector
 
 log = logging.getLogger("lighter")
 logging.basicConfig(
@@ -40,14 +40,18 @@ import os
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    ingest_task = None
+    tasks: list[asyncio.Task] = []
     if not os.getenv("VERCEL"):
-        ingest_task = asyncio.create_task(traders_service.ingest_loop())
+        tasks.append(asyncio.create_task(traders_service.ingest_loop()))
+        # LIT trade ingestion must not depend on page traffic — the ledger went
+        # dark for 98.8h in Sep 2026 because it only ran on inbound requests.
+        tasks.append(asyncio.create_task(ws_collector.run_lit_stream()))
     yield
-    if ingest_task:
-        ingest_task.cancel()
+    for t in tasks:
+        t.cancel()
+    for t in tasks:
         with contextlib.suppress(asyncio.CancelledError):
-            await ingest_task
+            await t
 
 
 app = FastAPI(

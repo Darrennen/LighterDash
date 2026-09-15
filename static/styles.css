@@ -374,10 +374,59 @@ footer .spacer{margin-left:auto}
   .controls select{font-size:9px;padding:3px 5px}
 }
 @media (max-width:480px){
-  .controls[data-hide-mobile]{display:none}
+  .controls[data-hide-mobile]{display:flex;flex-wrap:wrap;gap:4px}
+  .controls[data-hide-mobile="refresh"]{display:none}
+  .controls .btn{font-size:9px;padding:3px 7px}
   .kpis{grid-template-columns:repeat(2,1fr) !important}
   #litPriceChart{height:140px !important}
   .tab-bar{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap}
   .tab{white-space:nowrap;flex-shrink:0}
   .acct-card{grid-template-columns:1fr 1fr !important}
+}
+
+
+/* ── Coverage strip + headline (LIT page) ──────────────────────
+   The page publishes its own sampling: a silent collector has to read as an
+   outage, never as a quiet market. */
+.cov-strip{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:7px 20px;font-size:11px;
+  background:var(--panel);border-bottom:1px solid var(--line);
+  font-family:var(--font-mono);color:var(--ink-dim);
+}
+.cov-dot{width:7px;height:7px;border-radius:50%;background:var(--ink-faint);flex:none}
+.cov-strip[data-status="live"]    .cov-dot{background:var(--green);box-shadow:0 0 6px var(--green)}
+.cov-strip[data-status="partial"] .cov-dot{background:var(--amber)}
+.cov-strip[data-status="stale"]   .cov-dot{background:var(--amber)}
+.cov-strip[data-status="down"]    .cov-dot{background:var(--red);box-shadow:0 0 6px var(--red)}
+.cov-status{font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink)}
+.cov-strip[data-status="partial"] .cov-status,
+.cov-strip[data-status="stale"]   .cov-status{color:var(--amber)}
+.cov-strip[data-status="down"]    .cov-status{color:var(--red)}
+.cov-sep{color:var(--line-2)}
+.cov-gaps{margin-left:auto;color:var(--amber)}
+/* A blackout must dominate the page, not whisper on one line. */
+.cov-strip[data-status="down"]{
+  background:rgba(255,106,119,.10);border-bottom-color:var(--red);
+}
+
+.headline{
+  padding:12px 20px 0;font-size:14px;line-height:1.5;color:var(--ink);
+  letter-spacing:-.01em;
+}
+.headline .hl-num{font-family:var(--font-mono);font-weight:600}
+.headline .hl-dim{color:var(--ink-dim)}
+
+/* Provenance: exchange truth and locally observed tape must not look alike. */
+.prov{
+  font-family:var(--font-mono);font-size:8px;letter-spacing:.08em;
+  text-transform:uppercase;padding:1px 4px;border-radius:2px;vertical-align:middle;
+}
+.prov-x{color:var(--accent);background:rgba(111,185,255,.12)}
+.prov-o{color:var(--ink-faint);background:var(--line)}
+
+@media (max-width:480px){
+  .cov-strip{padding:6px 12px;font-size:10px}
+  .cov-gaps{margin-left:0;width:100%}
+  .headline{padding:10px 12px 0;font-size:13px}
 }

@@ -89,9 +89,22 @@ CREATE TABLE IF NOT EXISTS account_pnl_cache (
 """
 
 
+# Columns added after the original schema shipped. ALTER TABLE ADD COLUMN is the
+# only safe migration against the live 589K-row ledger, and it must stay idempotent.
+_MIGRATIONS = [
+    ("lit_trades", "trade_type", "TEXT NOT NULL DEFAULT 'trade'"),
+]
+
+
 async def init_db() -> None:
     async with aiosqlite.connect(settings.DB_PATH) as db:
         await db.executescript(SCHEMA)
+        for table, column, decl in _MIGRATIONS:
+            cur = await db.execute(f"PRAGMA table_info({table})")
+            cols = {r[1] for r in await cur.fetchall()}
+            if column not in cols:
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+                log.info("migrated: %s.%s added", table, column)
         await db.commit()
 
 
@@ -235,19 +248,23 @@ async def write_lit_trades(trades: list[dict[str, Any]]) -> int:
         return 0
     payload = [
         (t["trade_id"], t["market_id"], t["ts"], t["price"],
-         t["size"], t["usd"], t["buyer_id"], t["seller_id"], t["taker_is_buyer"])
+         t["size"], t["usd"], t["buyer_id"], t["seller_id"], t["taker_is_buyer"],
+         t.get("trade_type", "trade"))
         for t in trades
     ]
     async with aiosqlite.connect(settings.DB_PATH) as db:
+        before = db.total_changes
         await db.executemany(
             """INSERT OR IGNORE INTO lit_trades
                (trade_id, market_id, ts, price, size, usd,
-                buyer_id, seller_id, taker_is_buyer)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                buyer_id, seller_id, taker_is_buyer, trade_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             payload,
         )
         await db.commit()
-    return len(payload)
+        # Rows actually inserted, not rows offered — OR IGNORE silently drops
+        # duplicates, and the caller needs the real number to report ingest health.
+        return db.total_changes - before
 
 
 async def fetch_lit_trades(
@@ -297,7 +314,9 @@ async def fetch_lit_flow(hours: int = 24, market_id: int | None = None) -> dict[
                 SUM(CASE WHEN taker_is_buyer=1 THEN usd ELSE 0 END),
                 SUM(CASE WHEN taker_is_buyer=0 THEN usd ELSE 0 END),
                 COUNT(*),
-                MIN(ts)
+                MIN(ts),
+                MAX(ts),
+                SUM(CASE WHEN taker_is_buyer NOT IN (0,1) THEN usd ELSE 0 END)
                FROM lit_trades WHERE {where}""",
             params,
         )
@@ -310,6 +329,8 @@ async def fetch_lit_flow(hours: int = 24, market_id: int | None = None) -> dict[
         "delta_usd": buy_usd - sell_usd,
         "trade_count": row[2] or 0,
         "oldest_ts": row[3],
+        "newest_ts": row[4],
+        "unknown_usd": row[5] or 0.0,
         "hours": hours,
         "market_id": market_id,
     }
@@ -489,13 +510,17 @@ async def fetch_lit_candles_db(
     v = sum(usd). Returns the newest `count` buckets, ascending by time.
     """
     bucket_ms = minutes * 60_000
+    # Bound the query to the range the resolution actually claims. Without this
+    # the query returned the last `count` NON-EMPTY buckets from all history, so
+    # a "5m" chart silently spanned 56 days of sparse snapshots.
+    since_ms = int(time.time() * 1000) - bucket_ms * count
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute(
             """
             WITH base AS (
                 SELECT ts, price, usd, (ts / ?) AS bucket_idx
                 FROM lit_trades
-                WHERE market_id = ?
+                WHERE market_id = ? AND ts >= ?
             ),
             ranked AS (
                 SELECT bucket_idx, price, usd,
@@ -517,7 +542,7 @@ async def fetch_lit_candles_db(
             )
             SELECT bucket_idx * ? AS t, o, h, l, c, v FROM agg ORDER BY bucket_idx ASC
             """,
-            (bucket_ms, market_id, count, bucket_ms),
+            (bucket_ms, market_id, since_ms, count, bucket_ms),
         )
         rows = await cur.fetchall()
     return [
@@ -545,12 +570,17 @@ async def fetch_relative_performance(hours: int) -> dict[str, Any]:
         rows = await cur.fetchall()
 
     if not rows:
-        return {"hours": hours, "base_ts": None, "series": {"LIT": [], "BTC": [], "ETH": []}}
+        return {"hours": hours, "base_ts": None, "requested_since": since,
+                "covered_hours": 0.0, "series": {"LIT": [], "BTC": [], "ETH": []}}
 
     lit0, btc0, eth0 = rows[0][1], rows[0][2], rows[0][3]
+    # The index bases at the first sample we HAVE, which may be well inside the
+    # requested window — the caller has to label the real period, not `hours`.
     return {
         "hours": hours,
         "base_ts": rows[0][0],
+        "requested_since": since,
+        "covered_hours": round((rows[-1][0] - rows[0][0]) / 3600, 2),
         "series": {
             "LIT": [{"ts": r[0], "value": round(r[1] / lit0 * 100, 4)} for r in rows],
             "BTC": [{"ts": r[0], "value": round(r[2] / btc0 * 100, 4)} for r in rows],
@@ -576,13 +606,124 @@ async def fetch_volume_by_venue(hours: int) -> dict[str, Any]:
         )
         rows = await cur.fetchall()
 
+    # Zero-fill: SQLite only returns buckets that contain trades, so a sparse
+    # ledger silently collapsed "24h" into a single bar. Empty hours are data.
+    have = {int(r[0]): (r[1] or 0.0, r[2] or 0.0) for r in rows}
+    first = (since_ms // bucket_ms) * bucket_ms
+    last = (int(time.time() * 1000) // bucket_ms) * bucket_ms
+    buckets = []
+    b = first
+    while b <= last:
+        perp, spot = have.get(b, (0.0, 0.0))
+        buckets.append({"ts": b // 1000, "perp": perp, "spot": spot})
+        b += bucket_ms
     return {
         "hours": hours,
         "bucket": "hour" if hours <= 168 else "day",
-        "buckets": [
-            {"ts": int(r[0]) // 1000, "perp": r[1] or 0.0, "spot": r[2] or 0.0}
-            for r in rows
-        ],
+        "buckets": buckets,
+        "populated": len(have),
+    }
+
+
+async def fetch_lit_coverage(hours: int = 24, gap_threshold_s: int = 300) -> dict[str, Any]:
+    """How much of `hours` the ledger actually observed.
+
+    A dashboard built on a sampled tape has to publish its own sampling. This
+    reports ledger freshness plus every ingestion gap wider than
+    `gap_threshold_s`, so a silent collector reads as a hole rather than as a
+    quiet market (the Sep-11→15 blackout rendered as `$0` under a green dot).
+    """
+    since_ms = int((time.time() - hours * 3600) * 1000)
+    gap_ms = gap_threshold_s * 1000
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """SELECT COUNT(*), MIN(ts), MAX(ts), COALESCE(SUM(usd), 0)
+               FROM lit_trades WHERE ts >= ?""",
+            (since_ms,),
+        )
+        n, oldest, newest, usd = await cur.fetchone()
+
+        cur = await db.execute(
+            """WITH g AS (
+                 SELECT ts, ts - LAG(ts) OVER (ORDER BY ts) AS gap
+                 FROM lit_trades WHERE ts >= ?
+               )
+               SELECT ts - gap AS gap_start, ts AS gap_end, gap
+               FROM g WHERE gap > ?
+               ORDER BY gap DESC LIMIT 20""",
+            (since_ms, gap_ms),
+        )
+        gaps = [
+            {"start_ts": r[0], "end_ts": r[1], "seconds": round(r[2] / 1000)}
+            for r in await cur.fetchall()
+        ]
+
+    window_ms = hours * 3_600_000
+    # Time before the first observed trade counts as missing too.
+    lead_ms = (oldest - since_ms) if oldest else window_ms
+    missing_ms = sum(g["seconds"] * 1000 for g in gaps) + max(0, lead_ms)
+    return {
+        "hours": hours,
+        "trade_count": n or 0,
+        "usd": usd or 0.0,
+        "oldest_ts": oldest,
+        "newest_ts": newest,
+        "stale_seconds": round(time.time() - newest / 1000) if newest else None,
+        "gaps": gaps,
+        "observed_pct": round(max(0.0, 1 - missing_ms / window_ms) * 100, 1),
+    }
+
+
+async def fetch_lit_twap(
+    window_ms: int = 600_000,
+    min_usd: float = 5_000.0,
+    min_trades: int = 3,
+    market_id: int | None = None,
+) -> dict[str, Any]:
+    """Accounts accumulating steadily on one side within a rolling window.
+
+    Computed in SQL over the FULL window. The client used to derive this from
+    the last 100 trades returned to the page, which at live ingest rates covers
+    about a minute — so a "10 min" pattern could never actually be seen.
+    """
+    since_ms = int(time.time() * 1000) - window_ms
+    extra, params_extra = ("", [])
+    if market_id is not None:
+        extra, params_extra = (" AND market_id = ?", [market_id])
+
+    out: dict[str, list] = {}
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        for side, acct_col, flag in (("buyers", "buyer_id", 1), ("sellers", "seller_id", 0)):
+            cur = await db.execute(
+                f"""SELECT {acct_col} AS account_id,
+                           SUM(usd)   AS total_usd,
+                           COUNT(*)   AS trades,
+                           MAX(usd)   AS max_usd,
+                           MIN(ts)    AS first_ts,
+                           MAX(ts)    AS last_ts
+                    FROM lit_trades
+                    WHERE ts >= ? AND taker_is_buyer = ? AND {acct_col} > 0{extra}
+                    GROUP BY {acct_col}
+                    HAVING SUM(usd) >= ? AND COUNT(*) >= ?
+                    ORDER BY total_usd DESC
+                    LIMIT 25""",
+                (since_ms, flag, *params_extra, min_usd, min_trades),
+            )
+            rows = await cur.fetchall()
+            out[side] = [
+                {
+                    "account_id": r[0], "total_usd": r[1], "trades": r[2],
+                    "max_usd": r[3], "first_ts": r[4], "last_ts": r[5],
+                    "avg_usd": r[1] / r[2] if r[2] else 0,
+                    # Mean spacing across the account's own run of fills.
+                    "avg_spacing_ms": (r[5] - r[4]) / (r[2] - 1) if r[2] > 1 else 0,
+                }
+                for r in rows
+            ]
+    return {
+        **out,
+        "window_ms": window_ms, "min_usd": min_usd,
+        "min_trades": min_trades, "since_ts": since_ms,
     }
 
 

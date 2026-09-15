@@ -5,9 +5,14 @@
 const state = {
   hours: 24,
   market: '',        // '' = all, '120' = perp, '2049' = spot
-  whaleMin: 100000,
+  // A single print and a 10-minute cumulative are different scales. Sharing one
+  // threshold made the TWAP card unfirable: its floor was $50K while the
+  // busiest account-side 10-min total observed was $10.4K.
+  whaleMin: 1000,         // highlight one big print
+  twapMinUsd: 5000,       // flag cumulative accumulation
   twapWindowMs: 600000,   // 10 min rolling window
   twapMinTrades: 3,
+  coverage: null,
   refreshMs: 10000,
   pollTimer: null,
   tickCount: 0,
@@ -54,6 +59,17 @@ function setStatus(kind, text) {
   const dot = $('#statusDot'), txt = $('#statusText');
   dot.className = 'dot' + (kind === 'err' ? ' err' : kind === 'warn' ? ' warn' : '');
   txt.textContent = text;
+}
+
+// The header light reports the LEDGER, not the last fetch. A 200 response
+// carrying four days of nothing is not "live".
+function statusFromCoverage(cov) {
+  if (!cov) return ['warn', 'checking…'];
+  const age = cov.stale_seconds;
+  if (cov.status === 'down')  return ['err',  age == null ? 'no data' : 'stale ' + fmtDuration(age / 3600)];
+  if (cov.status === 'stale') return ['err',  'stale ' + fmtDuration(age / 3600)];
+  if (cov.status === 'partial') return ['warn', 'partial · ' + cov.observed_pct + '% observed'];
+  return ['ok', 'live'];
 }
 
 async function apiGet(path) {
@@ -111,6 +127,73 @@ function renderSummary(data) {
   }
 }
 
+// ── coverage strip ────────────────────────────────────────────
+// Every number below this strip comes from a sampled tape. The strip states
+// how much of the window was actually observed, so the reader can discount
+// accordingly instead of trusting a confident-looking zero.
+function renderCoverage(cov) {
+  state.coverage = cov;
+  const strip = $('#coverageStrip');
+  if (!strip || !cov) return;
+  strip.dataset.status = cov.status;
+
+  const label = {
+    live:    'ingest live',
+    partial: 'partial coverage',
+    stale:   'ingest stalled',
+    down:    'ingest down',
+  }[cov.status] || cov.status;
+  $('#covStatus').textContent = label;
+
+  $('#covObserved').innerHTML =
+    `<span style="color:var(--ink)">${cov.observed_pct}%</span> of ${periodLabel(cov.hours)} observed`;
+
+  $('#covFresh').textContent = cov.stale_seconds == null
+    ? 'no trades in window'
+    : 'last trade ' + fmtDuration(cov.stale_seconds / 3600) + ' ago';
+
+  const ws = cov.ws || {};
+  $('#covStream').innerHTML = ws.connected
+    ? `stream up ${fmtDuration((ws.uptime_seconds || 0) / 3600)} · ${Number(ws.trades_written || 0).toLocaleString()} written`
+    : `<span style="color:var(--red)">stream down</span>${ws.last_error ? ' · ' + ws.last_error : ''}`;
+
+  const gaps = cov.gaps || [];
+  $('#covGaps').textContent = gaps.length
+    ? `⚠ ${gaps.length} gap${gaps.length > 1 ? 's' : ''} · largest ${fmtDuration(gaps[0].seconds / 3600)}`
+    : '';
+}
+
+// ── headline ──────────────────────────────────────────────────
+// One sentence at the top: price truth from the exchange, flow read from the
+// tape we actually saw, and the caveat inline rather than buried.
+function renderHeadline(summary, flow) {
+  const el = $('#headline');
+  if (!el) return;
+  const cov = state.coverage;
+  const perp = (summary && summary.perp) || {};
+  const px = perp.last_price, chg = perp.price_change;
+
+  if (cov && (cov.status === 'down' || cov.status === 'stale')) {
+    el.innerHTML = `<span style="color:var(--red)">Flow data unavailable</span> `
+      + `<span class="hl-dim">— the trade ledger has no fills for `
+      + `${cov.stale_seconds == null ? 'this window' : fmtDuration(cov.stale_seconds / 3600)}. `
+      + `Price below is live from the exchange; every flow number is not.</span>`;
+    return;
+  }
+
+  const dir = (chg ?? 0) >= 0 ? 'up' : 'down';
+  const delta = flow ? (flow.delta_usd || 0) : 0;
+  const side = delta >= 0 ? 'net buying' : 'net selling';
+  const obs = cov ? `${cov.observed_pct}% of the window observed` : 'partial window';
+  el.innerHTML =
+    `LIT <span class="hl-num ${dir}">${fmtPrice(px)}</span> `
+    + `<span class="hl-num ${dir}">${fmtPct(chg)}</span> 24h `
+    + `<span class="hl-dim">·</span> observed tape shows `
+    + `<span class="hl-num ${delta >= 0 ? 'up' : 'down'}">${fmtUsd(Math.abs(delta))}</span> ${side} `
+    + `over ${periodLabel(state.hours)} `
+    + `<span class="hl-dim">(${obs})</span>`;
+}
+
 function renderFlow(data, actualHours) {
   const mktLbl = state.market === '120' ? ' · perp' : state.market === '2049' ? ' · spot' : '';
   const lbl = periodLabel(state.hours) + mktLbl;
@@ -135,7 +218,12 @@ function renderFlow(data, actualHours) {
   $('#flowTrades').textContent = Number(data.trade_count || 0).toLocaleString() + ' trades';
 
   const insufficient = actualHours > 0 && actualHours < state.hours * 0.95;
-  if (actualHours > 0) {
+  if (data.trade_count === 0) {
+    // Zero trades is the one state the old guard could not express, so it
+    // rendered as a calm "$0" — the same shape as a genuinely quiet market.
+    $('#flowCoverage').innerHTML =
+      '<span style="color:var(--red)">⚠ no trades recorded in this window</span>';
+  } else if (actualHours > 0) {
     $('#flowCoverage').innerHTML = insufficient
       ? `<span style="color:var(--amber)">⚠ only ${fmtDuration(actualHours)} collected</span>`
       : fmtDuration(actualHours) + ' of data';
@@ -143,8 +231,17 @@ function renderFlow(data, actualHours) {
     $('#flowCoverage').textContent = 'building…';
   }
 
+  // Volume whose aggressor side could not be determined is reported, never
+  // folded into the sell bucket.
+  if (data.unknown_usd > 0) {
+    $('#flowCoverage').innerHTML +=
+      `<br><span style="color:var(--amber)">${fmtUsd(data.unknown_usd)} unclassified side</span>`;
+  }
+
   // KPI cells — show actual window in sub-label
-  const dataLbl = actualHours > 0 ? fmtDuration(actualHours) : lbl;
+  const dataLbl = data.trade_count === 0
+    ? 'no data'
+    : (actualHours > 0 ? fmtDuration(actualHours) : lbl);
   $('#kpi-buy').textContent = fmtUsd(buy);
   $('#kpi-buy-sub').textContent = dataLbl + ' · aggressive buys';
   $('#kpi-sell').textContent = fmtUsd(sell);
@@ -337,70 +434,7 @@ async function toggleLeaderExpand(accountId, role) {
 
 // ── TWAP detection ────────────────────────────────────────────
 
-function detectTwap(trades) {
-  const cutoff = Date.now() - state.twapWindowMs;
-  const byBuyer = new Map();
 
-  for (const t of trades) {
-    if (t.taker_is_buyer !== 1) continue;
-    if (t.ts < cutoff) continue;
-    if (!byBuyer.has(t.buyer_id)) {
-      byBuyer.set(t.buyer_id, { total_usd: 0, count: 0, max_usd: 0, first_ts: t.ts, last_ts: t.ts, tsList: [] });
-    }
-    const acc = byBuyer.get(t.buyer_id);
-    acc.total_usd += t.usd;
-    acc.count++;
-    acc.max_usd = Math.max(acc.max_usd, t.usd);
-    acc.first_ts = Math.min(acc.first_ts, t.ts);
-    acc.last_ts  = Math.max(acc.last_ts,  t.ts);
-    acc.tsList.push(t.ts);
-  }
-
-  const alerts = [];
-  for (const [buyer_id, acc] of byBuyer) {
-    if (acc.total_usd < state.whaleMin) continue;
-    if (acc.count < state.twapMinTrades) continue;
-    // Avg spacing between consecutive trades (ms)
-    acc.tsList.sort((a, b) => a - b);
-    const gaps = acc.tsList.slice(1).map((ts, i) => ts - acc.tsList[i]);
-    const avgSpacingMs = gaps.length ? gaps.reduce((s, g) => s + g, 0) / gaps.length : 0;
-    alerts.push({ buyer_id, ...acc, avgSpacingMs });
-  }
-
-  return alerts.sort((a, b) => b.total_usd - a.total_usd);
-}
-
-function detectTwapSells(trades) {
-  const cutoff = Date.now() - state.twapWindowMs;
-  const bySeller = new Map();
-
-  for (const t of trades) {
-    if (t.taker_is_buyer !== 0) continue;
-    if (t.ts < cutoff) continue;
-    if (!bySeller.has(t.seller_id)) {
-      bySeller.set(t.seller_id, { total_usd: 0, count: 0, max_usd: 0, first_ts: t.ts, last_ts: t.ts, tsList: [] });
-    }
-    const acc = bySeller.get(t.seller_id);
-    acc.total_usd += t.usd;
-    acc.count++;
-    acc.max_usd = Math.max(acc.max_usd, t.usd);
-    acc.first_ts = Math.min(acc.first_ts, t.ts);
-    acc.last_ts  = Math.max(acc.last_ts,  t.ts);
-    acc.tsList.push(t.ts);
-  }
-
-  const alerts = [];
-  for (const [seller_id, acc] of bySeller) {
-    if (acc.total_usd < state.whaleMin) continue;
-    if (acc.count < state.twapMinTrades) continue;
-    acc.tsList.sort((a, b) => a - b);
-    const gaps = acc.tsList.slice(1).map((ts, i) => ts - acc.tsList[i]);
-    const avgSpacingMs = gaps.length ? gaps.reduce((s, g) => s + g, 0) / gaps.length : 0;
-    alerts.push({ seller_id, ...acc, avgSpacingMs });
-  }
-
-  return alerts.sort((a, b) => b.total_usd - a.total_usd);
-}
 
 function renderTwap(buyAlerts, sellAlerts) {
   const tbody = $('#twapBody');
@@ -410,7 +444,7 @@ function renderTwap(buyAlerts, sellAlerts) {
     : '';
 
   if (!total) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty">no accounts accumulating ≥ ${fmtUsd(state.whaleMin)} in ${fmtDuration(state.twapWindowMs/3600000)} with ${state.twapMinTrades}+ trades</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty">no accounts accumulating ≥ ${fmtUsd(state.twapMinUsd)} in ${fmtDuration(state.twapWindowMs/3600000)} with ${state.twapMinTrades}+ trades</td></tr>`;
     return;
   }
 
@@ -420,8 +454,8 @@ function renderTwap(buyAlerts, sellAlerts) {
     const spacingLbl = a.avgSpacingMs >= 60000
       ? (a.avgSpacingMs / 60000).toFixed(1) + 'min'
       : Math.round(a.avgSpacingMs / 1000) + 's';
-    const mega = a.total_usd >= 1_000_000;
-    const big  = a.total_usd >= 500_000;
+    const mega = a.total_usd >= state.twapMinUsd * 10;
+    const big  = a.total_usd >= state.twapMinUsd * 3;
     const badge = mega
       ? `<span class="tier t1" style="margin-right:6px">MEGA</span>`
       : big
@@ -511,12 +545,14 @@ async function pollOnce() {
     setStatus('warn', 'syncing…');
     const h = state.hours;
     const mq = state.market ? `&market_id=${state.market}` : '';
-    const [summary, tradesRes, flow, leaders] = await Promise.all([
+    const [summary, tradesRes, flow, leaders, cov] = await Promise.all([
       apiGet('/api/lit/summary'),
       apiGet(`/api/lit/trades?limit=100&hours=24${mq}`),
       apiGet(`/api/lit/flow?hours=${h}${mq}`),
       apiGet(`/api/lit/leaders?hours=${h}&top_n=15${mq}`),
+      apiGet(`/api/lit/coverage?hours=${h || 24}`),
     ]);
+    renderCoverage(cov);
 
     const actualHours = flow.oldest_ts
       ? (Date.now() - flow.oldest_ts) / 3600000
@@ -527,7 +563,10 @@ async function pollOnce() {
       const bh = Number(b.dataset.hours);
       if (bh === 0) return; // "ALL TIME" button needs no coverage warning
       const orig = b.dataset.label || (b.dataset.label = b.textContent);
-      if (actualHours > 0 && actualHours < bh * 0.95) {
+      if (flow.trade_count === 0) {
+        b.textContent = orig + ' (none)';
+        if (!b.classList.contains('active')) b.style.color = 'var(--red)';
+      } else if (actualHours > 0 && actualHours < bh * 0.95) {
         b.textContent = orig + ' (' + fmtDuration(actualHours) + ')';
         if (!b.classList.contains('active')) b.style.color = 'var(--amber)';
       } else {
@@ -537,8 +576,16 @@ async function pollOnce() {
     });
 
     state._lastTrades = tradesRes.trades || [];
-    const twapAlerts     = detectTwap(state._lastTrades);
-    const twapSellAlerts = detectTwapSells(state._lastTrades);
+    const twap = await apiGet(
+      `/api/lit/twap?window_ms=${state.twapWindowMs}&min_usd=${state.twapMinUsd}`
+      + `&min_trades=${state.twapMinTrades}${mq}`);
+    const asAlert = (a, key) => ({
+      [key]: a.account_id,
+      total_usd: a.total_usd, count: a.trades, max_usd: a.max_usd,
+      first_ts: a.first_ts, last_ts: a.last_ts, avgSpacingMs: a.avg_spacing_ms,
+    });
+    const twapAlerts     = (twap.buyers  || []).map(a => asAlert(a, 'buyer_id'));
+    const twapSellAlerts = (twap.sellers || []).map(a => asAlert(a, 'seller_id'));
     state._twapBuyers  = new Set(twapAlerts.map(a => a.buyer_id));
     state._twapSellers = new Set(twapSellAlerts.map(a => a.seller_id));
     renderSummary(summary);
@@ -548,10 +595,13 @@ async function pollOnce() {
     renderTwap(twapAlerts, twapSellAlerts);
     renderCvd(state._lastTrades);
 
+    renderHeadline(summary, flow);
+
     state.tickCount++;
     $('#tickCount').textContent = state.tickCount + ' polls';
     $('#lastSync').textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
-    setStatus('ok', 'live');
+    const [kind, txt] = statusFromCoverage(cov);
+    setStatus(kind, txt);
   } catch (e) {
     console.error(e);
     setStatus('err', 'error · ' + e.message);
@@ -567,29 +617,25 @@ function schedule() {
 
 // ── event wiring ──────────────────────────────────────────────
 
-function recomputePressure() {
-  if (!state._lastTrades) return;
-  const buyAlerts  = detectTwap(state._lastTrades);
-  const sellAlerts = detectTwapSells(state._lastTrades);
-  state._twapBuyers  = new Set(buyAlerts.map(a => a.buyer_id));
-  state._twapSellers = new Set(sellAlerts.map(a => a.seller_id));
-  renderTrades(state._lastTrades);
-  renderTwap(buyAlerts, sellAlerts);
-}
+
+$('#twapMinUsd').addEventListener('change', e => {
+  state.twapMinUsd = Number(e.target.value);
+  pollOnce();
+});
 
 $('#whaleSelect').addEventListener('change', e => {
   state.whaleMin = Number(e.target.value);
-  recomputePressure();
+  renderTrades(state._lastTrades || []);
 });
 
 $('#twapWindowSelect').addEventListener('change', e => {
   state.twapWindowMs = Number(e.target.value);
-  recomputePressure();
+  pollOnce();
 });
 
 $('#twapMinTrades').addEventListener('change', e => {
   state.twapMinTrades = Number(e.target.value);
-  recomputePressure();
+  pollOnce();
 });
 
 $$('.controls .btn[data-market]').forEach(b => {
@@ -810,6 +856,7 @@ document.getElementById('trackAddInput').addEventListener('keydown', e => {
 
 let _chartRes = '1h';
 let _chartData = [];
+let _chartRange = { start: null, end: null, bucket: null };
 
 function _normCandle(c) {
   // handle multiple field name styles from Lighter API
@@ -851,11 +898,19 @@ function drawCandleChart(candles) {
   const py = p => pad.t + ((maxP - p) / rangeP * chartH);
 
   const n = norm.length;
-  const colW = chartW / n;
+  // X is TIME, not array position. With a sparse ledger, index-spacing drew
+  // irregular gaps as if they were evenly spaced bars — a "5m" chart that
+  // actually spanned weeks looked identical to a continuous one.
+  const t0 = _chartRange.start || norm[0].ts;
+  const t1 = _chartRange.end   || norm[n - 1].ts;
+  const span = (t1 - t0) || 1;
+  const tx = t => pad.l + ((t - t0) / span) * chartW;
+  const bucketMs = _chartRange.bucket || (span / Math.max(n, 1));
+  const colW = Math.max(1.5, (bucketMs / span) * chartW);
   const bodyW = Math.max(1, colW * 0.6);
 
-  const candleSvg = norm.map((c, i) => {
-    const x = pad.l + i * colW + colW / 2;
+  const candleSvg = norm.map((c) => {
+    const x = tx(c.ts) + colW / 2;
     const isBull = c.c >= c.o;
     const col = isBull ? 'var(--green)' : 'var(--red)';
     const bodyTop = py(Math.max(c.o, c.c));
@@ -883,20 +938,27 @@ function drawCandleChart(candles) {
 
   // volume bars
   const maxV = Math.max(...norm.map(c => c.v)) || 1;
-  const volBars = norm.map((c, i) => {
-    const x = pad.l + i * colW;
+  const volBars = norm.map((c) => {
+    const x = tx(c.ts);
     const bh = (c.v / maxV * VH).toFixed(1);
     const col = c.c >= c.o ? 'rgba(111,224,137,0.5)' : 'rgba(255,106,119,0.5)';
     return `<rect x="${x.toFixed(1)}" y="${(VH - bh).toFixed(1)}" width="${(colW - 0.5).toFixed(1)}" height="${bh}" fill="${col}"/>`;
   }).join('');
   volEl.innerHTML = `<svg viewBox="0 0 ${W} ${VH}" preserveAspectRatio="none" style="width:100%;height:${VH}px;display:block">${volBars}</svg>`;
 
-  // axis labels
-  const first = norm[0], last = norm[norm.length - 1];
+  // axis labels — evenly spaced ticks over the window the chart claims to show,
+  // so a data gap is visible as empty space rather than silently compressed away.
   const fmtLabel = ts => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleString('en-MY', {
     timeZone: 'Asia/Kuala_Lumpur', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false
   });
-  if (axisEl) axisEl.innerHTML = `<span>${fmtLabel(first.ts)}</span><span>${fmtLabel(last.ts)}</span>`;
+  if (axisEl) {
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => fmtLabel(t0 + span * f));
+    axisEl.innerHTML = ticks.map(t => `<span>${t}</span>`).join('');
+    const covered = ((norm[n - 1].ts - norm[0].ts) / span * 100);
+    if (covered < 60) {
+      axisEl.innerHTML += `<span style="color:var(--amber)">⚠ ${covered.toFixed(0)}% of window has data</span>`;
+    }
+  }
 
   // price label
   const lastC = norm[norm.length - 1];
@@ -912,6 +974,7 @@ async function pollCandles() {
   try {
     const data = await apiGet(`/api/lit/candles?resolution=${_chartRes}&market_id=120`);
     _chartData = data.candles || [];
+    _chartRange = { start: data.range_start, end: data.range_end, bucket: data.bucket_ms };
     drawCandleChart(_chartData);
   } catch(e) {
     console.warn('candles fetch failed:', e.message);
@@ -949,10 +1012,20 @@ function drawRelPerf(data) {
   const el = document.getElementById('relPerfChart');
   if (!el) return;
 
+  const rpLbl = document.getElementById('rpCoverage');
   if (!data || !data.series || !data.series.LIT || !data.series.LIT.length) {
     el.innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:12px 0">not enough history yet</div>';
+    if (rpLbl) rpLbl.innerHTML = '<span style="color:var(--amber)">no snapshots in window</span>';
     state._rpHover = null;
     return;
+  }
+  // The index bases at the first snapshot we HAVE. If that is well inside the
+  // requested window, say so — otherwise "7d" labels a 4.7d comparison.
+  if (rpLbl) {
+    const cov = data.covered_hours || 0;
+    rpLbl.innerHTML = cov < _rpHours * 0.9
+      ? `indexed to 100 · <span style="color:var(--amber)">only ${fmtDuration(cov)} of ${fmtDuration(_rpHours)}</span>`
+      : 'indexed to 100';
   }
 
   const W = 800, H = 200;
@@ -968,7 +1041,12 @@ function drawRelPerf(data) {
   const range = (maxV - minV) || 1;
 
   const py = v => pad.t + ((maxV - v) / range * chartH);
-  const px = i => pad.l + (n > 1 ? (i / (n - 1)) * chartW : chartW / 2);
+  // Scale x by TIME across the REQUESTED window. Index-spacing gave the last
+  // 5 days two-thirds of a "30d" chart, because that is where the samples were.
+  const t0 = data.requested_since || lit[0].ts;
+  const t1 = Math.floor(Date.now() / 1000);
+  const span = (t1 - t0) || 1;
+  const px = i => pad.l + Math.max(0, Math.min(1, (lit[i].ts - t0) / span)) * chartW;
 
   const y100 = py(100);
   const baseline = `<line x1="${pad.l}" y1="${y100.toFixed(1)}" x2="${W - pad.r}" y2="${y100.toFixed(1)}" stroke="var(--line-2)" stroke-width="1" stroke-dasharray="3,3"/>`;
@@ -980,8 +1058,9 @@ function drawRelPerf(data) {
       <text x="${W - pad.r + 4}" y="${(y + 3).toFixed(1)}" fill="var(--ink-faint)" font-size="9" font-family="monospace">${v.toFixed(0)}</text>`;
   }).join('');
 
+  const ptx = ts => pad.l + Math.max(0, Math.min(1, (ts - t0) / span)) * chartW;
   const mkLine = (series, color) => {
-    const pts = series.map((p, i) => `${px(i).toFixed(1)},${py(p.value).toFixed(1)}`).join(' ');
+    const pts = series.map(p => `${ptx(p.ts).toFixed(1)},${py(p.value).toFixed(1)}`).join(' ');
     return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"/>`;
   };
 
@@ -1094,6 +1173,15 @@ function drawVolVenue(data) {
   if (!el) return;
 
   const buckets = (data && data.buckets) || [];
+  // Buckets are zero-filled server-side, so an empty hour is a visible hole
+  // rather than a collapsed axis. Say how many of them actually carry trades.
+  const vvLbl = document.getElementById('vvCoverage');
+  if (vvLbl && data) {
+    const pop = data.populated || 0;
+    vvLbl.innerHTML = pop < buckets.length
+      ? `perp vs spot · <span style="color:var(--amber)">${pop}/${buckets.length} ${data.bucket}s with data</span>`
+      : 'perp vs spot';
+  }
   if (!buckets.length) {
     el.innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:12px 0">volume ledger warming up</div>';
     return;

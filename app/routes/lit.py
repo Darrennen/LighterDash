@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.db import (
     fetch_backfill_status,
+    fetch_lit_coverage,
+    fetch_lit_twap,
     fetch_lit_account_flow,
     fetch_lit_account_trades,
     fetch_lit_candles_db,
@@ -28,6 +30,7 @@ from app.services.collector import (
     collect_once,
 )
 from app.services.lighter_client import client
+from app.services import ws_collector
 from app.services.store import store
 
 router = APIRouter()
@@ -78,7 +81,10 @@ async def _maybe_refresh() -> None:
     if now - _last_market >= _TTL:
         _last_market = now
         tasks.append(collect_once())
-    if now - _last_lit >= _TTL:
+    # LIT trades normally arrive over the WebSocket stream. Only fall back to
+    # REST sampling while that stream is down — it under-captures large fills,
+    # so it is a stopgap, not the source of truth.
+    if not ws_collector.state["connected"] and now - _last_lit >= _TTL:
         _last_lit = now
         tasks.append(collect_lit_once())
     if tasks:
@@ -115,6 +121,32 @@ async def backfill_trigger():
     """Manually kick off the next batch of account history backfill."""
     asyncio.create_task(backfill_account_histories())
     return {"started": True}
+
+
+@router.get("/coverage")
+async def coverage(hours: int = Query(24, ge=1, le=8760)):
+    """What the ledger actually observed, plus live ingest health.
+
+    The page derives its status light from this, not from HTTP success — a
+    silent collector must read as an outage, not as a quiet market.
+    """
+    await _maybe_refresh()
+    cov = await fetch_lit_coverage(hours=hours)
+    ws = ws_collector.health()
+    stale = cov.get("stale_seconds")
+    if cov["trade_count"] == 0:
+        # An empty window is never "partial" — it is an outage until proven
+        # otherwise, which is exactly the state that used to render as $0.
+        status = "down"
+    elif not ws["connected"] and (stale is None or stale > 300):
+        status = "down"
+    elif stale is not None and stale > 300:
+        status = "stale"
+    elif cov["observed_pct"] < 95:
+        status = "partial"
+    else:
+        status = "live"
+    return {**cov, "ws": ws, "status": status}
 
 
 @router.get("/trades")
@@ -275,10 +307,34 @@ async def candles(
         except Exception as e:
             log.warning("candles fetch failed: %s", e)
             raw = []
-    result = {"candles": raw, "market_id": market_id, "resolution": resolution, "ts": int(now * 1000)}
+    # Publish the range the chart is supposed to cover so the client can scale
+    # its x-axis to TIME rather than to array index.
+    bucket_ms = minutes * 60_000
+    result = {
+        "candles": raw, "market_id": market_id, "resolution": resolution,
+        "ts": int(now * 1000),
+        "range_start": int(now * 1000) - bucket_ms * count,
+        "range_end": int(now * 1000),
+        "bucket_ms": bucket_ms,
+    }
     _candles_cache[cache_key] = result
     _candles_cache_ts[cache_key] = now
     return result
+
+
+@router.get("/twap")
+async def twap(
+    window_ms: int = Query(600_000, ge=60_000, le=3_600_000),
+    min_usd: float = Query(5000.0, ge=0),
+    min_trades: int = Query(3, ge=2, le=50),
+    market_id: int | None = None,
+):
+    """Rolling-window accumulation patterns, computed over the whole window."""
+    await _maybe_refresh()
+    return await fetch_lit_twap(
+        window_ms=window_ms, min_usd=min_usd,
+        min_trades=min_trades, market_id=_market_filter(market_id),
+    )
 
 
 @router.get("/leaders")
