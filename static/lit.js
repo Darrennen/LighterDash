@@ -52,6 +52,16 @@ const fmtTimeMYT = ts => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleTimeString
   timeZone: 'Asia/Kuala_Lumpur', hour12: false,
   hour: '2-digit', minute: '2-digit', second: '2-digit',
 });
+// "15 Sept, 18:35 → 20:09" when both ends are the same MYT day, otherwise the
+// full date on each side. The column is narrow; repeating the date wastes it.
+const _mytDay  = ts => new Date(ts).toLocaleDateString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' });
+const _mytTime = ts => new Date(ts).toLocaleTimeString('en-MY', {
+  timeZone: 'Asia/Kuala_Lumpur', hour12: false, hour: '2-digit', minute: '2-digit',
+});
+const fmtRangeMYT = (a, b) => _mytDay(a) === _mytDay(b)
+  ? `${fmtMYT(a)} → ${_mytTime(b)}`
+  : `${fmtMYT(a)} → ${fmtMYT(b)}`;
+
 const fmtAcct = id => id ? '#' + id : '—';
 const periodLabel = h => h === 0 ? 'all time' : h === 24 ? '24h' : h === 168 ? '7d' : h === 720 ? '30d' : h + 'h';
 
@@ -224,9 +234,20 @@ function renderFlow(data, actualHours) {
     $('#flowCoverage').innerHTML =
       '<span style="color:var(--red)">⚠ no trades recorded in this window</span>';
   } else if (actualHours > 0) {
-    $('#flowCoverage').innerHTML = insufficient
-      ? `<span style="color:var(--amber)">⚠ only ${fmtDuration(actualHours)} collected</span>`
-      : fmtDuration(actualHours) + ' of data';
+    // Name the actual window. "4.2h of data" does not say WHICH 4.2 hours, so
+    // a stale ledger and a fresh one read identically.
+    const spanH = (data.newest_ts - data.oldest_ts) / 3600000;
+    const staleMin = (Date.now() - data.newest_ts) / 60000;
+    const range = fmtRangeMYT(data.oldest_ts, data.newest_ts);
+    const head = insufficient
+      ? `<span style="color:var(--amber)">⚠ ${range}</span>`
+      : range;
+    // Trades can stop arriving inside a window that still looks "full", so the
+    // gap between the last fill and now is stated separately from the span.
+    const tail = staleMin >= 5
+      ? `<span style="color:var(--amber)">last trade ${fmtDuration(staleMin / 60)} ago</span>`
+      : `${fmtDuration(spanH)} spanned`;
+    $('#flowCoverage').innerHTML = `${head}<br><span style="color:var(--ink-faint)">${tail}</span>`;
   } else {
     $('#flowCoverage').textContent = 'building…';
   }
