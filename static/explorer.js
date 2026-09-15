@@ -281,15 +281,59 @@ function filterSeriesByPeriod(series, period) {
   return after.length ? after : series;
 }
 
+// Which curve the card is showing. Flow is cumulative net USD traded (what the
+// account paid out minus took in); the PnL curves are FIFO-reconstructed
+// realised P&L, split because a leveraged perp book and a spot inventory are
+// not the same question.
+let _flowSeriesKind = 'flow';
+
+const FLOW_SERIES = {
+  flow: { label: 'Net Trade Flow',
+          note: 'cumulative net USD traded · buys negative, sells positive' },
+  perp: { label: 'Perp Realised PnL',
+          note: 'FIFO round-trips on perp markets · excludes funding and unrealised' },
+  all:  { label: 'Spot + Perp Realised PnL',
+          note: 'FIFO round-trips across all markets · excludes funding and unrealised' },
+};
+
+// The PnL curves come from /api/traders/pnl, which loads separately from the
+// fills. Null means not ready yet — distinct from an empty series.
+let _pnlSeriesAll = null, _pnlSeriesPerp = null;
+
+function currentFlowSeries() {
+  if (_flowSeriesKind === 'perp') return _pnlSeriesPerp;
+  if (_flowSeriesKind === 'all')  return _pnlSeriesAll;
+  return _fillSeries;
+}
+
 function renderFlowChart(period) {
   _flowPeriod = period;
-  const series = filterSeriesByPeriod(_fillSeries, period);
+  const meta = FLOW_SERIES[_flowSeriesKind] || FLOW_SERIES.flow;
+  const lblEl = $('#flowSeriesLbl'), noteEl = $('#flowSeriesNote');
+  if (lblEl)  lblEl.textContent = meta.label;
+  if (noteEl) noteEl.textContent = meta.note;
+
+  const source = currentFlowSeries();
   const total  = $('#flowPnlTotal');
+  if (source === null) {
+    // still reconstructing — say so rather than drawing a flat zero line
+    const empty = $('#flowChartEmpty'), svg = $('#flowChart');
+    if (svg) svg.style.display = 'none';
+    if (empty) { empty.style.display = ''; empty.textContent = 'reconstructing PnL from trade history…'; }
+    if (total) { total.textContent = '—'; total.style.color = ''; }
+    return;
+  }
+  const series = filterSeriesByPeriod(source, period);
   if (!series.length) {
     const empty = $('#flowChartEmpty');
     const svg   = $('#flowChart');
     if (svg) svg.style.display = 'none';
-    if (empty) { empty.style.display = ''; empty.textContent = 'no trade history in this window'; }
+    if (empty) {
+      empty.style.display = '';
+      empty.textContent = _flowSeriesKind === 'flow'
+        ? 'no trade history in this window'
+        : 'no closed round-trips in this window';
+    }
     if (total) { total.textContent = '—'; total.style.color = ''; }
     return;
   }
@@ -361,6 +405,10 @@ function resetPnlUI() {
   clearTimeout(_pnlPollTimer);
   _pnlPollTimer = null;
   _pnlData = null;
+  // Drop the previous account's curves — null means "not ready", so the flow
+  // card shows "reconstructing…" instead of the last account's PnL.
+  _pnlSeriesAll = null;
+  _pnlSeriesPerp = null;
   const heroPnl = $('#heroPnl');
   heroPnl.textContent = '—';
   heroPnl.style.color = '';
@@ -436,10 +484,18 @@ function renderPnlHero(data) {
 }
 
 function renderPnlTab(data) {
-  const series = (data.pnl_timeseries || []).map(([t, v]) => ({
+  const toSeries = rows => (rows || []).map(([t, v]) => ({
     t: t > 1e12 ? t : t * 1000,
     v: parseFloat(v),
   }));
+  const series = toSeries(data.pnl_timeseries);
+  // Feed the flow card's PnL views. Only mark them available once the
+  // reconstruction is actually done — a half-built curve is a wrong curve.
+  if (data.status === 'ready') {
+    _pnlSeriesAll  = series;
+    _pnlSeriesPerp = toSeries(data.pnl_timeseries_perp);
+    if (_flowSeriesKind !== 'flow') renderFlowChart(_flowPeriod);
+  }
   drawPnlChart(series);
 
   const rows = data.recent_closed || [];
@@ -890,6 +946,15 @@ $$('[data-flow-period]').forEach(b => {
     $$('[data-flow-period]').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
     renderFlowChart(b.dataset.flowPeriod);
+  });
+});
+
+$$('[data-flow-series]').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('[data-flow-series]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    _flowSeriesKind = b.dataset.flowSeries;
+    renderFlowChart(_flowPeriod);
   });
 });
 

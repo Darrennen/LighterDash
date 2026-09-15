@@ -93,6 +93,7 @@ async def _refresh_market_meta() -> None:
         mid = int(mid_raw)
         meta[mid] = {
             "symbol": d.get("symbol") or f"MKT-{mid}",
+            "market_type": d.get("market_type", "perp"),
             "last_price": _num(d.get("last_trade_price")),
             "volume_24h": _num(d.get("daily_quote_token_volume")),
         }
@@ -635,6 +636,12 @@ def _reconstruct_pnl(fills: list[dict]) -> dict[str, Any]:
     lots: dict[int, list[dict]] = {}
     closed: list[dict] = []
     pnl_timeseries: list[list[float]] = []
+    # Split curves. Perp and spot P&L answer different questions — one is a
+    # leveraged directional book, the other is inventory — so they are tracked
+    # separately as well as combined.
+    pnl_ts_perp: list[list[float]] = []
+    pnl_ts_spot: list[list[float]] = []
+    cum_perp = cum_spot = 0.0
     volume_usd = 0.0
     long_pnl = 0.0
     short_pnl = 0.0
@@ -661,6 +668,11 @@ def _reconstruct_pnl(fills: list[dict]) -> dict[str, Any]:
                 pnl = (price - lot["price"]) * matched
                 trip_side = "long"
             cum += pnl
+            is_spot = _market_meta.get(mkt, {}).get("market_type") == "spot"
+            if is_spot:
+                cum_spot += pnl
+            else:
+                cum_perp += pnl
             if trip_side == "long":
                 long_pnl += pnl
             else:
@@ -675,6 +687,8 @@ def _reconstruct_pnl(fills: list[dict]) -> dict[str, Any]:
                 "closed_ts": f["ts"],
             })
             pnl_timeseries.append([f["ts"], round(cum, 6)])
+            (pnl_ts_spot if is_spot else pnl_ts_perp).append(
+                [f["ts"], round(cum_spot if is_spot else cum_perp, 6)])
             lot["size"] -= matched
             remaining -= matched
             if lot["size"] <= 1e-9:
@@ -712,6 +726,10 @@ def _reconstruct_pnl(fills: list[dict]) -> dict[str, Any]:
         "long_pnl": round(long_pnl, 2),
         "short_pnl": round(short_pnl, 2),
         "pnl_timeseries": pnl_timeseries,
+        "pnl_timeseries_perp": pnl_ts_perp,
+        "pnl_timeseries_spot": pnl_ts_spot,
+        "realized_pnl_perp": round(cum_perp, 2),
+        "realized_pnl_spot": round(cum_spot, 2),
         "recent_closed": list(reversed(closed[-20:])),
     }
 
@@ -723,7 +741,9 @@ def _pnl_skeleton(status_label: str = "building") -> dict[str, Any]:
         "realized_pnl_est": None, "volume_usd": None, "win_rate": None,
         "wins": 0, "losses": 0, "best_streak": 0, "worst_streak": 0,
         "long_pnl": None, "short_pnl": None,
-        "pnl_timeseries": [], "recent_closed": [],
+        "realized_pnl_perp": None, "realized_pnl_spot": None,
+        "pnl_timeseries": [], "pnl_timeseries_perp": [], "pnl_timeseries_spot": [],
+        "recent_closed": [],
     }
 
 

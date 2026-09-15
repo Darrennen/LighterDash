@@ -193,14 +193,22 @@
       <div style="background:var(--bg);padding:18px 22px;min-height:220px">
         <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;flex-wrap:wrap">
           <div>
-            <div style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:4px">Net Trade Flow</div>
+            <div id="flowSeriesLbl" style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:4px">Net Trade Flow</div>
             <div id="flowPnlTotal" style="font-family:var(--mono);font-weight:600;font-size:26px;font-weight:500;letter-spacing:-.02em;line-height:1">—</div>
+            <div id="flowSeriesNote" style="font-size:10px;color:var(--ink-faint);margin-top:4px"></div>
           </div>
-          <div style="margin-left:auto;display:flex;gap:3px;flex-wrap:wrap" id="flowPeriodBtns">
+          <div style="margin-left:auto;display:flex;flex-direction:column;gap:5px;align-items:flex-end">
+          <div style="display:flex;gap:3px;flex-wrap:wrap" id="flowSeriesBtns">
+            <button class="btn active" data-flow-series="flow">Flow</button>
+            <button class="btn" data-flow-series="perp">Perp PnL</button>
+            <button class="btn" data-flow-series="all">Spot+Perp PnL</button>
+          </div>
+          <div style="display:flex;gap:3px;flex-wrap:wrap" id="flowPeriodBtns">
             <button class="btn active" data-flow-period="all">All</button>
             <button class="btn" data-flow-period="30d">30d</button>
             <button class="btn" data-flow-period="7d">7d</button>
             <button class="btn" data-flow-period="24h">24h</button>
+          </div>
           </div>
         </div>
         <svg id="flowChart" viewBox="0 0 400 100" preserveAspectRatio="none" style="width:100%;height:110px;display:none;overflow:visible"></svg>
@@ -359,6 +367,6 @@
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/explorer.js?v=20260915a"></script>
+<script type="module" src="/static/explorer.js?v=20260915b"></script>
 </body>
 </html>
