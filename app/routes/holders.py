@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from app.db import fetch_lit_l1_holders
+from app.db import fetch_lit_l1_holder, fetch_lit_l1_holders
 from app.services import traders_service
 
 router = APIRouter()
@@ -39,3 +39,12 @@ async def l1_holders(
     the entire L2 float.
     """
     return await fetch_lit_l1_holders(limit=limit, offset=offset)
+
+
+@router.get("/l1/lookup")
+async def l1_lookup(address: str = Query(..., min_length=42, max_length=42)):
+    """Where one L1 address sits in the global LIT holder set, or 404."""
+    row = await fetch_lit_l1_holder(address)
+    if not row:
+        raise HTTPException(status_code=404, detail="address holds no LIT on L1")
+    return row

@@ -904,6 +904,41 @@ async def fetch_lit_l1_holders(limit: int = 100, offset: int = 0) -> dict[str, A
     }
 
 
+async def fetch_lit_l1_holder(address: str) -> dict[str, Any] | None:
+    """One address's place in the global LIT holder set.
+
+    Lets the explorer answer for an L1 address that holds LIT but has no Lighter
+    account — which is most of them, since holding on Ethereum requires no
+    Lighter account at all.
+    """
+    addr = (address or "").strip().lower()
+    if not addr:
+        return None
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT rank, address, lit, kind, label FROM lit_l1_holders WHERE address = ?",
+            (addr,),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        cur = await db.execute("SELECT COUNT(*) FROM lit_l1_holders")
+        total_holders = (await cur.fetchone())[0]
+        cur = await db.execute("SELECT v FROM lit_l1_meta WHERE k IN ('total_supply','snapshot_ts')")
+        meta_rows = await cur.fetchall()
+        cur = await db.execute("SELECT k, v FROM lit_l1_meta")
+        meta = {k: v for k, v in await cur.fetchall()}
+
+    rank, a, lit, kind, label = row
+    supply = float(meta.get("total_supply") or 0) or None
+    return {
+        "address": a, "rank": rank, "lit": lit, "kind": kind, "label": label,
+        "pct_supply": (lit / supply * 100) if supply else None,
+        "total_holders": total_holders,
+        "snapshot_ts": meta.get("snapshot_ts"),
+    }
+
+
 async def fetch_lit_stats() -> dict[str, Any]:
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute("SELECT COUNT(*), MIN(ts), MAX(ts) FROM lit_trades")

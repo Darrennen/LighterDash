@@ -128,7 +128,7 @@ function renderHolders(l1) {
   };
   tbody.innerHTML = holders.map(h => `<tr${h.kind !== 'wallet' ? ' style="opacity:.75"' : ''}>
       <td class="rank">${h.rank}</td>
-      <td class="acct" style="font-size:11px">${h.address}${h.label ? `<div style="color:var(--ink-faint);font-size:10px">${h.label}</div>` : ''}</td>
+      <td class="acct" style="font-size:11px"><a href="/explorer?q=${h.address}" title="open in explorer" style="color:var(--ink);text-decoration:none;border-bottom:1px solid var(--line-2)">${h.address}</a>${h.label ? `<div style="color:var(--ink-faint);font-size:10px">${h.label}</div>` : ''}</td>
       <td class="num">${fmtLit(h.lit)}</td>
       <td class="num">${_litPrice ? fmtUsd(h.lit * _litPrice) : '—'}</td>
       <td class="num">${h.pct_supply != null ? h.pct_supply.toFixed(3) + '%' : '—'}</td>

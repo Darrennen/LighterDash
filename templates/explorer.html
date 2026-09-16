@@ -91,6 +91,9 @@
     </div>
     <div id="loadingBox">Looking up account…</div>
     <div id="errorBox"></div>
+    <!-- An L1 address can hold LIT without ever having a Lighter account, so a
+         failed account lookup is not necessarily a dead end. -->
+    <div id="l1Card" style="display:none;margin-top:12px;padding:16px 18px;background:var(--panel);border:1px solid var(--line);border-radius:3px"></div>
   </div>
 </section>
 
@@ -367,6 +370,6 @@
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/explorer.js?v=20260916d"></script>
+<script type="module" src="/static/explorer.js?v=20260917a"></script>
 </body>
 </html>

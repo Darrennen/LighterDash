@@ -1186,6 +1186,50 @@ async function loadProfile(accountIndex, address) {
   }
 }
 
+// ── L1 holder fallback ────────────────────────────────────────
+async function lookupL1Holder(address) {
+  try {
+    const r = await fetch(`/api/holders/l1/lookup?address=${encodeURIComponent(address)}`);
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
+function renderL1Card(d) {
+  const el = $('#l1Card');
+  if (!el) return;
+  const KIND = {
+    bridge: 'This is the Lighter L1 bridge — its balance is the entire L2 float, not one holder\'s position.',
+    burn:   'This is the burn address. These tokens are out of circulation.',
+  };
+  const asOf = d.snapshot_ts
+    ? new Date(Number(d.snapshot_ts) * 1000).toLocaleString('en-MY',
+        { timeZone: 'Asia/Kuala_Lumpur', hour12: false,
+          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '';
+  el.innerHTML = `
+    <div style="font-size:11px;color:var(--ink-faint);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">
+      No Lighter account — but this address holds LIT on Ethereum
+    </div>
+    <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:baseline">
+      <div>
+        <div class="card-lbl">LIT held</div>
+        <div style="font-family:var(--font-mono);font-size:24px;font-weight:600;color:var(--ink)">
+          ${Number(d.lit).toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
+      </div>
+      <div><div class="card-lbl">Rank</div>
+        <div style="font-family:var(--font-mono);font-size:16px">#${Number(d.rank).toLocaleString()}
+          <span style="color:var(--ink-faint);font-size:12px">of ${Number(d.total_holders).toLocaleString()}</span></div></div>
+      <div><div class="card-lbl">Share of supply</div>
+        <div style="font-family:var(--font-mono);font-size:16px">${d.pct_supply != null ? d.pct_supply.toFixed(4) + '%' : '—'}</div></div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--ink-dim)">
+      ${KIND[d.kind] || 'Holds LIT on Ethereum L1 and has never opened a Lighter account, so there is no trading history to show.'}
+      ${asOf ? `<span style="color:var(--ink-faint)"> · holder snapshot ${asOf}</span>` : ''}
+      <a href="/holders" style="margin-left:8px">see all holders →</a>
+    </div>`;
+  el.style.display = '';
+}
+
 async function doSearch() {
   const query = $('#searchInput').value.trim();
   if (!query) return;
@@ -1193,6 +1237,7 @@ async function doSearch() {
   $('#errorBox').style.display = 'none';
   $('#results').style.display = 'none';
   $('#profileStrip').style.display = 'none';
+  $('#l1Card').style.display = 'none';
   $('#acctType').style.display = 'none';
   $('#loadingBox').style.display = 'block';
   $('#searchBtn').disabled = true;
@@ -1228,8 +1273,16 @@ async function doSearch() {
     $('[data-tab="positions"]').classList.add('active');
     $('#tab-positions').classList.add('active');
   } catch (e) {
-    $('#errorBox').textContent = e.isUpstream ? e.message : 'Account not found: ' + e.message;
-    $('#errorBox').style.display = 'block';
+    // No Lighter account is the NORMAL case for an L1 holder — most of the
+    // 7,681 LIT holders never bridged. Answer from the holder set instead of
+    // showing a dead end.
+    const l1 = /^0x[0-9a-fA-F]{40}$/.test(query) ? await lookupL1Holder(query) : null;
+    if (l1) {
+      renderL1Card(l1);
+    } else {
+      $('#errorBox').textContent = e.isUpstream ? e.message : 'Account not found: ' + e.message;
+      $('#errorBox').style.display = 'block';
+    }
   } finally {
     $('#loadingBox').style.display = 'none';
     $('#searchBtn').disabled = false;
