@@ -68,49 +68,97 @@ function tierPill(tier, label) {
 }
 
 // ── KPI strip ────────────────────────────────────────────────
-function renderStats(d) {
-  if (!d) return;
-  $('#kpi-holders').textContent = fmtNum(d.holders_count);
-  $('#kpi-holders-sub').textContent = `≥100K LIT · of ${fmtNum(d.accounts_scanned)} accounts scanned`;
+// The KPI row reports the GLOBAL on-chain set. Bridge and burn balances are
+// split out rather than counted as holders: the bridge is the L2 float, and
+// burned LIT belongs to nobody.
+let _litPrice = 0;
 
-  $('#kpi-whales').textContent = fmtNum(d.stats?.whale_count);
-  $('#kpi-mega').textContent = fmtNum(d.stats?.mega_count);
+function renderStats(l1) {
+  if (!l1 || !l1.count) return;
+  const supply = Number(l1.meta.total_supply || 0);
+  const by = k => (l1.kinds || []).find(x => x.kind === k) || { lit: 0, holders: 0 };
+  const pct = v => supply ? ` · ${(v / supply * 100).toFixed(2)}% of supply` : '';
 
-  $('#kpi-tracked').textContent = fmtLit(d.tracked_lit_total);
-  $('#kpi-tracked-sub').textContent = `≈ ${fmtUsd(d.tracked_usd_total)} · whale+mega only`;
+  $('#kpi-holders').textContent = fmtNum(l1.count);
+  $('#kpi-holders-sub').textContent =
+    `addresses holding LIT · ${Number(l1.meta.accounted_pct).toFixed(2)}% of supply accounted`;
+
+  const w = by('wallet');
+  $('#kpi-wallets').textContent = fmtLit(w.lit);
+  $('#kpi-wallets-sub').textContent = `${fmtNum(w.holders)} wallets${pct(w.lit)}`;
+
+  const b = by('bridge');
+  $('#kpi-bridge').textContent = fmtLit(b.lit);
+  $('#kpi-bridge-sub').textContent = `held by the L1 bridge${pct(b.lit)}`;
+
+  const x = by('burn');
+  $('#kpi-burned').textContent = fmtLit(x.lit);
+  $('#kpi-burned-sub').textContent = `sent to 0x…dead${pct(x.lit)}`;
 }
 
 // ── Top LIT Holders table ───────────────────────────────────
-function renderHolders(d) {
+function renderHolders(l1) {
   const tbody = $('#holdersBody');
-  const holders = d?.holders || [];
-  $('#holdersCaption').textContent = d
-    ? `${fmtNum(d.holders_count)} whale+mega holders (≥100K LIT) among ${fmtNum(d.accounts_scanned)} accounts scanned · smaller balances tracked once, not kept fresh`
+  const holders = l1?.holders || [];
+  const asOf = l1?.meta?.snapshot_ts
+    ? new Date(Number(l1.meta.snapshot_ts) * 1000).toLocaleString('en-MY',
+        { timeZone: 'Asia/Kuala_Lumpur', hour12: false,
+          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '';
+  $('#holdersCaption').innerHTML = l1?.count
+    ? `every address holding LIT on Ethereum · ${fmtNum(l1.count)} total, `
+      + `${Number(l1.meta.accounted_pct).toFixed(2)}% of the 1B supply accounted`
+      + (asOf ? ` · as of ${asOf}` : '')
     : '';
 
-  if (!d) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty">holders unavailable — backend not reachable</td></tr>`;
+  if (!l1) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">holder set unavailable</td></tr>`;
     return;
   }
   if (!holders.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty">no holders tracked yet</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">holder set not loaded — run scripts/load_lit_holders.py</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = holders.map((h, i) => `<tr>
-      <td class="rank">${i + 1}</td>
-      <td>${acctCell(h.account_index)}</td>
-      <td class="num">${fmtLit(h.balance_lit)}</td>
-      <td class="num">${h.usd != null ? fmtUsd(h.usd) : '—'}</td>
-      <td class="num">${fmtPct1(h.share_pct)}</td>
-      <td>${tierPill(h.tier, TIER_LABEL[h.tier])}</td>
+  // Bridge and burn rows are real balances but not holders; marked so neither
+  // is read as somebody's position.
+  const KIND = {
+    bridge: '<span class="tier t1" title="Lighter L1 bridge — this balance is the L2 float">BRIDGE</span>',
+    burn:   '<span class="tier t3" title="sent to 0x…dead">BURNED</span>',
+  };
+  tbody.innerHTML = holders.map(h => `<tr${h.kind !== 'wallet' ? ' style="opacity:.75"' : ''}>
+      <td class="rank">${h.rank}</td>
+      <td class="acct" style="font-size:11px">${h.address}${h.label ? `<div style="color:var(--ink-faint);font-size:10px">${h.label}</div>` : ''}</td>
+      <td class="num">${fmtLit(h.lit)}</td>
+      <td class="num">${_litPrice ? fmtUsd(h.lit * _litPrice) : '—'}</td>
+      <td class="num">${h.pct_supply != null ? h.pct_supply.toFixed(3) + '%' : '—'}</td>
+      <td>${KIND[h.kind] || ''}</td>
     </tr>`).join('');
 }
 
+// ── L2 sample, demoted ───────────────────────────────────────────────
+function renderL2(d) {
+  const tbody = $('#l2Body');
+  const rows = d?.holders || [];
+  $('#l2Caption').textContent = d
+    ? `${fmtNum(d.holders_count)} accounts ≥100K LIT among ${fmtNum(d.accounts_scanned)} scanned — a sample of accounts observed trading, not the L2 total`
+    : 'unavailable';
+  tbody.innerHTML = rows.length
+    ? rows.map((h, i) => `<tr>
+        <td class="rank">${i + 1}</td>
+        <td>${acctCell(h.account_index)}</td>
+        <td class="num">${fmtLit(h.balance_lit)}</td>
+        <td class="num">${h.usd != null ? fmtUsd(h.usd) : '—'}</td>
+        <td>${tierPill(h.tier, TIER_LABEL[h.tier])}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="5" class="empty">no tracked L2 holders</td></tr>`;
+}
+
 // ── Tier Breakdown table ─────────────────────────────────────
-function renderTiers(d) {
+function renderTiers(l1) {
   const tbody = $('#tierBody');
-  const tiers = d?.tier_breakdown || [];
+  const tiers = (l1?.tiers || []).filter(t => t.holders > 0);
+  const supply = Number(l1?.meta?.total_supply || 0);
   if (!tiers.length) {
     tbody.innerHTML = `<tr><td colspan="5" class="empty">no tier data yet</td></tr>`;
     return;
@@ -122,18 +170,18 @@ function renderTiers(d) {
     return `<tr>
       <td>${tierPill(t.key, t.label)}</td>
       <td class="num">${threshold}</td>
-      <td class="num">${fmtNum(t.count)}</td>
-      <td class="num">${fmtLit(t.lit_sum)}</td>
-      <td class="num">${fmtPct1(t.share_pct)}</td>
+      <td class="num">${fmtNum(t.holders)}</td>
+      <td class="num">${fmtLit(t.lit)}</td>
+      <td class="num">${supply ? (t.lit / supply * 100).toFixed(2) + '%' : '—'}</td>
     </tr>`;
   }).join('');
 }
 
 // ── Holder Pyramid (hand-rolled inline SVG, mirrors drawVolVenue in lit.js) ──
-function drawPyramid(d) {
+function drawPyramid(l1) {
   const el = $('#pyramidChart');
   if (!el) return;
-  const tiers = d?.tier_breakdown || [];
+  const tiers = (l1?.tiers || []).filter(t => t.holders > 0);
   if (!tiers.length) {
     el.innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:12px 0">no tier data yet</div>';
     return;
@@ -142,18 +190,18 @@ function drawPyramid(d) {
   const W = 800, rowH = 28, gap = 10, labelW = 92, padR = 60;
   const barMaxW = W - labelW - padR;
   const H = tiers.length * rowH + (tiers.length - 1) * gap;
-  const max = Math.max(...tiers.map(t => t.count), 1);
+  const max = Math.max(...tiers.map(t => t.holders), 1);
 
   const rows = tiers.map((t, i) => {
     const y = i * (rowH + gap);
-    const w = Math.max(2, (t.count / max) * barMaxW);
+    const w = Math.max(2, (t.holders / max) * barMaxW);
     const c = TIER_COLOR[t.key] || { bg: 'var(--accent)', fg: 'var(--accent)' };
-    const title = `${t.label}: ${fmtNum(t.count)} holder${t.count === 1 ? '' : 's'} · ${fmtLit(t.lit_sum)} LIT`;
+    const title = `${t.label}: ${fmtNum(t.holders)} holder${t.holders === 1 ? '' : 's'} · ${fmtLit(t.lit)} LIT`;
     return `<g>
       <text x="0" y="${(y + rowH / 2 + 4).toFixed(1)}" fill="var(--ink-dim)" font-size="11" font-family="monospace">${t.label}</text>
       <rect x="${labelW}" y="${y}" width="${barMaxW}" height="${rowH}" fill="var(--line)" opacity="0.35"><title>${title}</title></rect>
       <rect x="${labelW}" y="${y}" width="${w.toFixed(1)}" height="${rowH}" fill="${c.bg}" stroke="${c.fg}" stroke-width="1"><title>${title}</title></rect>
-      <text x="${(labelW + w + 8).toFixed(1)}" y="${(y + rowH / 2 + 4).toFixed(1)}" fill="var(--ink)" font-size="11" font-family="monospace">${t.count}</text>
+      <text x="${(labelW + w + 8).toFixed(1)}" y="${(y + rowH / 2 + 4).toFixed(1)}" fill="var(--ink)" font-size="11" font-family="monospace">${fmtNum(t.holders)}</text>
     </g>`;
   }).join('');
 
@@ -162,15 +210,22 @@ function drawPyramid(d) {
 
 // ── fetch + refresh ──────────────────────────────────────────
 async function refreshAll() {
-  const d = await apiGet('/api/holders/summary?limit=100');
+  // Two different questions: the global on-chain holder set drives the page,
+  // and the Lighter L2 sample gets its own clearly-labelled section below.
+  const [l1, l2] = await Promise.all([
+    apiGet('/api/holders/l1?limit=100'),
+    apiGet('/api/holders/summary?limit=100'),
+  ]);
 
-  setStatus(d ? '' : 'err', d ? 'live' : 'backend unreachable');
+  setStatus(l1 ? '' : 'err', l1 ? 'live' : 'backend unreachable');
   $('#lastSync').textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
 
-  renderStats(d);
-  renderHolders(d);
-  renderTiers(d);
-  drawPyramid(d);
+  _litPrice = Number(l2?.lit_price || 0);
+  renderStats(l1);
+  renderHolders(l1);
+  renderTiers(l1);
+  drawPyramid(l1);
+  renderL2(l2);
 }
 
 // ── boot ─────────────────────────────────────────────────────

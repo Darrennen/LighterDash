@@ -81,6 +81,26 @@ CREATE TABLE IF NOT EXISTS account_snapshots (
     payload           TEXT NOT NULL
 );
 
+-- Every LIT holder on Ethereum L1, reconstructed from the full ERC-20 Transfer
+-- history (486K events since 2025-10-27) and validated to sum to the whole 1B
+-- supply. account_snapshots below is a DIFFERENT, much smaller set: LIT sitting
+-- in Lighter L2 accounts that happened to trade.
+CREATE TABLE IF NOT EXISTS lit_l1_holders (
+    address   TEXT    PRIMARY KEY,
+    lit       REAL    NOT NULL,
+    rank      INTEGER NOT NULL,
+    kind      TEXT    NOT NULL DEFAULT 'wallet',  -- wallet | contract | bridge | burn
+    label     TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_lit_l1_rank ON lit_l1_holders (rank ASC);
+
+-- Snapshot provenance. A holder table with no as-of date gets trusted after it
+-- stops being true.
+CREATE TABLE IF NOT EXISTS lit_l1_meta (
+    k TEXT PRIMARY KEY,
+    v TEXT
+);
+
 CREATE TABLE IF NOT EXISTS account_pnl_cache (
     account_key TEXT    PRIMARY KEY,
     ts          INTEGER NOT NULL,
@@ -824,6 +844,64 @@ async def fetch_lit_positions(
         })
     return {"market_id": market_id, "positions": out, "count": len(out),
             "max_age_hours": max_age_hours}
+
+
+# Bands chosen to fit the real distribution: 17 addresses hold 72% of supply,
+# so round decades would put almost everything in one bucket.
+_L1_TIERS = [
+    ("mega",    "Mega Whale",  10_000_000, None),
+    ("whale",   "Whale",        1_000_000, 10_000_000),
+    ("shark",   "Shark",          100_000, 1_000_000),
+    ("dolphin", "Dolphin",         10_000, 100_000),
+    ("fish",    "Fish",             1_000, 10_000),
+    ("shrimp",  "Shrimp",               1, 1_000),
+    ("dust",    "Dust",                 0, 1),
+]
+
+
+async def fetch_lit_l1_holders(limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    """The global LIT holder set: every L1 address with a positive balance."""
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute("SELECT k, v FROM lit_l1_meta")
+        meta = {k: v for k, v in await cur.fetchall()}
+        if not meta:
+            return {"holders": [], "count": 0, "meta": {}, "tiers": [], "kinds": []}
+
+        cur = await db.execute(
+            """SELECT rank, address, lit, kind, label FROM lit_l1_holders
+               ORDER BY rank ASC LIMIT ? OFFSET ?""", (limit, offset))
+        rows = await cur.fetchall()
+
+        cur = await db.execute("SELECT COUNT(*), COALESCE(SUM(lit),0) FROM lit_l1_holders")
+        count, total = await cur.fetchone()
+
+        # Bridge / burn / contract are not people. Reported separately so the
+        # page never presents the L2 bridge float as somebody's position.
+        cur = await db.execute(
+            """SELECT kind, COUNT(*), COALESCE(SUM(lit),0) FROM lit_l1_holders
+               GROUP BY kind ORDER BY 3 DESC""")
+        kinds = [{"kind": k, "holders": n, "lit": v} for k, n, v in await cur.fetchall()]
+
+        tiers = []
+        for key, label, lo, hi in _L1_TIERS:
+            where = "lit >= ?" + (" AND lit < ?" if hi else "")
+            cur = await db.execute(
+                f"SELECT COUNT(*), COALESCE(SUM(lit),0) FROM lit_l1_holders WHERE {where}",
+                [lo] + ([hi] if hi else []))
+            n, held = await cur.fetchone()
+            tiers.append({"key": key, "label": label, "min": lo, "max": hi,
+                          "holders": n, "lit": held})
+
+    supply = float(meta.get("total_supply") or 0) or None
+    return {
+        "holders": [
+            {"rank": r, "address": a, "lit": l, "kind": k, "label": lb,
+             "pct_supply": (l / supply * 100) if supply else None}
+            for r, a, l, k, lb in rows
+        ],
+        "count": count, "total_lit": total,
+        "kinds": kinds, "tiers": tiers, "meta": meta,
+    }
 
 
 async def fetch_lit_stats() -> dict[str, Any]:

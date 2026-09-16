@@ -53,10 +53,10 @@
 
 <!-- KPI strip — whale+mega tier only, matches what's actually tracked -->
 <section class="kpis kpis-4">
-  <div class="kpi"><div class="lbl">Tracked Holders</div><div class="val" id="kpi-holders">—</div><div class="sub" id="kpi-holders-sub">&nbsp;</div></div>
-  <div class="kpi"><div class="lbl">Whales ≥100K LIT</div><div class="val" id="kpi-whales">—</div><div class="sub">≈ ≥$215K</div></div>
-  <div class="kpi"><div class="lbl">Mega ≥1M LIT</div><div class="val" id="kpi-mega">—</div><div class="sub">≈ ≥$2.15M</div></div>
-  <div class="kpi"><div class="lbl">Tracked LIT</div><div class="val" id="kpi-tracked">—</div><div class="sub" id="kpi-tracked-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">LIT Holders <span class="prov prov-x">on-chain</span></div><div class="val" id="kpi-holders">—</div><div class="sub" id="kpi-holders-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Held in Wallets</div><div class="val" id="kpi-wallets">—</div><div class="sub" id="kpi-wallets-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">On Lighter L2</div><div class="val" id="kpi-bridge">—</div><div class="sub" id="kpi-bridge-sub">&nbsp;</div></div>
+  <div class="kpi"><div class="lbl">Burned</div><div class="val" id="kpi-burned">—</div><div class="sub" id="kpi-burned-sub">&nbsp;</div></div>
 </section>
 
 <main class="bento">
@@ -64,18 +64,18 @@
   <!-- Top LIT Holders -->
   <section class="card span-12">
     <div class="card-head">
-      <span class="card-title">Top LIT Holders <span class="count" id="holdersCaption"></span></span>
+      <span class="card-title">Every LIT Holder <span class="count" id="holdersCaption"></span></span>
     </div>
     <div id="holdersTableWrap" style="overflow-x:auto">
       <table id="holdersTable">
         <thead>
           <tr>
             <th>#</th>
-            <th>Account</th>
+            <th>Address</th>
             <th class="num">Balance (LIT)</th>
             <th class="num">USD Value</th>
-            <th class="num">% of Tracked</th>
-            <th>Tier</th>
+            <th class="num">% of Supply</th>
+            <th>Type</th>
           </tr>
         </thead>
         <tbody id="holdersBody"><tr><td colspan="6" class="empty">loading holders…</td></tr></tbody>
@@ -84,6 +84,20 @@
   </section>
 
   <!-- Tier Breakdown -->
+  <!-- The L2 sample, demoted: it answers a different question (who holds LIT
+       inside Lighter) and covers only accounts observed trading. -->
+  <section class="card span-12">
+    <div class="card-head">
+      <span class="card-title">On Lighter L2 <span class="count" id="l2Caption">tracked trading accounts only</span></span>
+    </div>
+    <div style="overflow-x:auto">
+      <table id="l2Table">
+        <thead><tr><th>#</th><th>Account</th><th class="num">Balance (LIT)</th><th class="num">USD</th><th>Tier</th></tr></thead>
+        <tbody id="l2Body"><tr><td colspan="5" class="empty">loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="card span-6">
     <div class="card-head">
       <span class="card-title">Tier Breakdown <span class="count">now · no history</span></span>
@@ -108,7 +122,7 @@
       <span class="card-title">Holder Pyramid <span class="count">wallet count by balance band</span></span>
     </div>
     <div id="pyramidChart" style="min-height:160px"></div>
-    <div style="font-size:10px;color:var(--ink-faint);margin-top:8px">Smaller tiers (Dolphin/Fish/Shrimp) aren't shown — only Whale+ balances are kept fresh, so this only tracks the top of the distribution.</div>
+    <div style="font-size:10px;color:var(--ink-faint);margin-top:8px">Every band is shown: the holder set is reconstructed from the full ERC-20 transfer history, so this is the whole distribution rather than the top of it.</div>
   </section>
 
 </main>
@@ -116,13 +130,13 @@
 <footer>
   <span>backend · <a href="/docs" target="_blank">/docs</a> · <a href="/api/holders/summary" target="_blank">/api/holders/summary</a></span>
   <span style="color:var(--ink-faint)">·</span>
-  <span style="color:var(--ink-faint)">shows Whale+ tier only (≥100K LIT) among tracked/scanned accounts, not the full LIT holder base — no staking pool data</span>
+  <span style="color:var(--ink-faint)">every Ethereum address holding LIT, reconstructed from all ERC-20 transfers and validated against the 1B total supply · balances are L1; LIT bridged to Lighter L2 sits in the bridge row</span>
   <div class="spacer"></div>
   <span>data · <a href="https://lighter.xyz" target="_blank" style="color:var(--ink-dim)">lighter.xyz</a></span>
   <span style="color:var(--ink-faint)">·</span>
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/holders.js?v=20260724a"></script>
+<script type="module" src="/static/holders.js?v=20260917c"></script>
 </body>
 </html>
