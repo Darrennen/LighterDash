@@ -35,7 +35,18 @@ FIFO explorer-log reconstruction. Re-test that assumption before building around
   "account not found".
 - `account_type`: 0 = standard, 1 = sub-account. **Sub-accounts get indices near 2^48 and
   are REAL traders — never filter by index magnitude.** Only exclude known pool accounts
-  (`SYSTEM_ACCOUNTS` in `app/db.py`; LIT staking pool = 281474976710654).
+  (`SYSTEM_ACCOUNTS` in `app/db.py`).
+
+- **CORRECTION 2026-09-16: account 281474976710654 is NOT the LIT staking pool.**
+  Its own metadata names it **"Lighter Liquidity Provider (LLP)"** — "a community-owned
+  and protocol-run pool that provides liquidity to Lighter, runs market making strategies,
+  and handles liquidations". It is USDC-denominated ($64.8M margin balance, 203 open
+  positions), holds no LIT asset row, and has the zero L1 address. Excluding it from
+  holder scans is still right, but it is a system trading pool, not staking.
+  `_LIT_STAKING_POOL` in `app/routes/explorer.py` points at this index, so the
+  explorer's "LIT Staking" tab is really reporting **LLP share ownership**. The real
+  LIT staking pool, if one exists, has not been located — `publicPoolsMetadata`
+  returns an empty list for every anonymous parameter combination tried.
 
 ## Trade ingestion — WebSocket, not polling (2026-09-15)
 
