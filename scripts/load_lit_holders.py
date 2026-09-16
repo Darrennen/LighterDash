@@ -7,11 +7,15 @@ which validates by summing to the whole 1,000,000,000 supply.
 
     python3 scripts/load_lit_holders.py LIT_holders_L1_2026-09-17.csv
 
-CSV columns: rank,address,lit,pct_supply
+CSV columns: rank,address,lit,kind,entity,category
 
-Refresh: re-run Dune query 8748815, export CSV, re-run this. The loader
+Refresh: re-run Dune query 8749098, export CSV, re-run this. The loader
 replaces the table wholesale — a holder set merged from two dates would mix
 balances from different blocks.
+
+Balances come from the query in exact wei, not doubles: summing doubles made
+the dust boundary non-deterministic and moved the holder count by +/-2 between
+identical runs.
 """
 from __future__ import annotations
 
@@ -52,6 +56,12 @@ def main(csv_path: str) -> None:
         for r in csv.DictReader(f):
             addr = r["address"].strip().lower()
             kind, label = classify(addr)
+            # Dune's own classification wins unless this is the bridge or burn
+            # address, which we name explicitly.
+            if kind == "wallet":
+                kind = (r.get("kind") or "wallet").strip() or "wallet"
+                entity, cat = (r.get("entity") or "").strip(), (r.get("category") or "").strip()
+                label = f"{entity} · {cat}" if entity and cat else entity
             rows.append((addr, float(r["lit"]), int(r["rank"]), kind, label))
 
     if not rows:
