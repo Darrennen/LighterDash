@@ -55,6 +55,15 @@ const fmtMYT = ts => {
 };
 const truncAddr = a => a ? a.slice(0, 6) + '…' + a.slice(-4) : '—';
 
+// "15 Sept, 18:35 → 20:09" when both ends share an MYT day, else both dates.
+const _mytDay  = ts => new Date(ts).toLocaleDateString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' });
+const _mytTime = ts => new Date(ts).toLocaleTimeString('en-MY', {
+  timeZone: 'Asia/Kuala_Lumpur', hour12: false, hour: '2-digit', minute: '2-digit',
+});
+const fmtRangeMYT = (a, b) => _mytDay(a) === _mytDay(b)
+  ? `${fmtMYT(a)} → ${_mytTime(b)}`
+  : `${fmtMYT(a)} → ${fmtMYT(b)}`;
+
 let _markets = null;          // market_id -> { symbol, market_type }
 let _marketsPromise = null;
 
@@ -1023,8 +1032,20 @@ function renderLitFlow(data) {
     const netCls = net >= 0 ? 'color:var(--green)' : 'color:var(--red)';
     const noData = buy === 0 && sell === 0;
 
+    // The label is a promise the fetch cannot always keep: it is capped at 30
+    // log pages, which for an active account covers hours, not 30 days. Show
+    // the dates actually covered, and say so when the window is short.
+    const dateLine = (d.oldest_ts && d.newest_ts)
+      ? fmtRangeMYT(d.oldest_ts, d.newest_ts)
+      : '';
+    const short = d.covers_window === false;
+
     return `<div style="background:var(--bg);padding:18px">
-      <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:12px">${labels[p]}</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">
+        <span style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)">${labels[p]}</span>
+        ${short ? `<span style="font-size:9px;color:var(--amber)" title="history fetch reached its page limit before this window started">partial</span>` : ''}
+      </div>
+      <div style="font-size:10px;color:${short ? 'var(--amber)' : 'var(--ink-faint)'};margin-bottom:12px;font-family:var(--mono)">${dateLine || '&nbsp;'}</div>
       ${noData ? `<div style="color:var(--ink-faint);font-size:11px">no LIT trades found in this window</div>` : `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
         <div>

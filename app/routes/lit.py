@@ -217,6 +217,12 @@ async def account_flow_live(
     trades: list[dict] = []
     BATCH = 3   # pages fetched concurrently
     MAX_PAGES = 30
+    # How far back the fetch actually reached. The page cap is hit long before
+    # 30 days for an active account — 3,000 log entries covered just 1.8h for a
+    # market maker — so the windows below must report their real coverage
+    # instead of implying they span their label.
+    oldest_seen_ms = now_ms
+    reached_cutoff = False
 
     offset = 0
     done = False
@@ -237,7 +243,12 @@ async def account_flow_live(
                     trades.append(t)
             # stop when the oldest log on this page predates our 30d cutoff
             oldest_in_page = min((_log_entry_ts_ms(e) for e in logs), default=0)
+            if oldest_in_page:
+                oldest_seen_ms = min(oldest_seen_ms, oldest_in_page)
             if oldest_in_page < cutoff_ms or len(logs) < 100:
+                # Either we went past 30d, or the account's history ran out —
+                # both mean the window is genuinely covered.
+                reached_cutoff = True
                 done = True
                 break
         offset += BATCH * 100
@@ -253,7 +264,12 @@ async def account_flow_live(
         buy_size  = sum(t["size"] for t in buys)
         sell_usd  = sum(t["usd"]  for t in sells)
         sell_size = sum(t["size"] for t in sells)
+        ts_in_window = [t["ts"] for t in w]
         result[label] = {
+            # The window we could actually see, not the one the label promises.
+            "oldest_ts":     min(ts_in_window) if ts_in_window else None,
+            "newest_ts":     max(ts_in_window) if ts_in_window else None,
+            "covers_window": reached_cutoff or oldest_seen_ms <= since_ms,
             "buy_usd":       buy_usd,
             "buy_size":      buy_size,
             "buy_trades":    len(buys),
@@ -266,6 +282,11 @@ async def account_flow_live(
             "net_size":      buy_size - sell_size,
         }
     result["_address"] = address  # let frontend cache this for future requests
+    result["_coverage"] = {
+        "oldest_fetched_ts": oldest_seen_ms,
+        "truncated": not reached_cutoff,   # hit the page cap before 30d
+        "max_pages": MAX_PAGES,
+    }
     return result
 
 
