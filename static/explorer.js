@@ -97,9 +97,7 @@ $$('.tab').forEach(tab => {
     if (tab.dataset.tab === 'lit-history' && _histAddress) {
       loadHistory(_histOffset);
     }
-    if (tab.dataset.tab === 'lit-flow' && _currentAccountIndex) {
-      loadLitFlow(_currentAccountIndex);
-    }
+
   });
 });
 
@@ -1164,6 +1162,7 @@ async function doSearch() {
 
     renderAccount(data, priceMap);
     loadProfile(data.account_index ?? data.index, data.l1_address || '');
+    loadLitFlow(data.account_index ?? data.index);
 
     // switch to positions tab by default
     $$('.tab').forEach(t => t.classList.remove('active'));
