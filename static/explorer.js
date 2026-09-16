@@ -485,8 +485,12 @@ function renderPnlHero(data) {
     : '—';
 
   const cov = data.coverage || {};
+  // The exchange publishes a realised-PnL figure for this account; this row is
+  // a FIFO reconstruction over however many fills we could crawl. They will
+  // disagree — 726722 showed -$637.92K against +$1.18K — so say what this one
+  // is measured over instead of letting two headline numbers compete.
   $('#pnlHeroCaveat').textContent = cov.fills != null
-    ? `est. from ${cov.fills} fill${cov.fills !== 1 ? 's' : ''}${cov.since_ts ? ' since ' + fmtMYT(cov.since_ts) : ''}, fees excl.${cov.complete === false ? ' · partial coverage' : ''}`
+    ? `this row is reconstructed from the last ${cov.fills} fill${cov.fills !== 1 ? 's' : ''}${cov.since_ts ? ' (since ' + fmtMYT(cov.since_ts) + ')' : ''}, fees and funding excluded${cov.complete === false ? ' — partial coverage, so it will not match the exchange figure above' : ''}`
     : 'estimates reconstructed from on-chain fills, fees excl.';
 }
 
@@ -1033,8 +1037,23 @@ function renderLitFlow(data) {
   const grid = $('#litFlowGrid');
   if (!grid || !data) return;
 
-  const periods = ['24h', '7d', '30d'];
+  let periods = ['24h', '7d', '30d'];
   const labels = { '24h': '24 Hours', '7d': '7 Days', '30d': '30 Days' };
+
+  // When the history fetch cannot reach past 24h, all three windows filter the
+  // same trades and render as three identical cards — which reads as a bug even
+  // with a partial flag on each. Collapse them into one card that states the
+  // single range actually covered.
+  const sig = k => {
+    const d = data[k] || {};
+    return `${d.oldest_ts}|${d.newest_ts}|${d.net_usd}`;
+  };
+  const collapsed = periods.every(k => sig(k) === sig('24h')) && (data['24h'] || {}).oldest_ts;
+  if (collapsed) {
+    periods = ['24h'];
+    labels['24h'] = 'All history reached';
+  }
+  grid.style.gridTemplateColumns = collapsed ? '1fr' : 'repeat(3,1fr)';
 
   grid.innerHTML = periods.map(p => {
     const d = data[p] || {};
@@ -1061,6 +1080,7 @@ function renderLitFlow(data) {
       <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">
         <span style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)">${labels[p]}</span>
         ${short ? `<span style="font-size:9px;color:var(--amber)" title="history fetch reached its page limit before this window started">partial</span>` : ''}
+        ${collapsed ? `<span style="font-size:9px;color:var(--ink-faint)">24h · 7d · 30d are identical — the log crawl reached no further back</span>` : ''}
       </div>
       <div style="font-size:10px;color:${short ? 'var(--amber)' : 'var(--ink-faint)'};margin-bottom:12px;font-family:var(--mono)">${dateLine || '&nbsp;'}</div>
       ${noData ? `<div style="color:var(--ink-faint);font-size:11px">no LIT trades found in this window</div>` : `
