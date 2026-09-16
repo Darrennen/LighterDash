@@ -56,6 +56,13 @@ _volvenue_cache: dict = {}
 _volvenue_cache_ts: dict = {}
 _VOLVENUE_TTL = 60.0
 
+# account-flow-live crawls explorer logs and takes ~15s. Without a cache the
+# ALL / LIT PERP / LIT SPOT buttons each pay that again, and so does every
+# re-lookup of the same address.
+_acctflow_cache: dict = {}
+_acctflow_cache_ts: dict = {}
+_ACCTFLOW_TTL = 120.0
+
 # market_id sentinel: None = all LIT markets, 120 = perp, 2049 = spot
 _VALID_MARKETS = {120, 2049}
 
@@ -199,8 +206,19 @@ async def account_flow_live(
     account_id: int,
     address: str = Query(""),
     market_id: int | None = None,
+    max_pages: int = Query(30, ge=1, le=60),
 ):
-    """Compute LIT buy/sell flow directly from explorer logs — no local DB needed."""
+    """Compute LIT buy/sell flow directly from explorer logs — no local DB needed.
+
+    `max_pages` bounds how far back the crawl reaches. The page returns a
+    shallow pass first so the cards paint in a couple of seconds, then requests
+    full depth to fill the longer windows.
+    """
+    cache_key = (account_id, market_id, max_pages)
+    now = time.time()
+    if cache_key in _acctflow_cache and now - _acctflow_cache_ts.get(cache_key, 0) < _ACCTFLOW_TTL:
+        return _acctflow_cache[cache_key]
+
     if not address:
         try:
             data = await client.account(by="index", value=str(account_id))
@@ -216,7 +234,7 @@ async def account_flow_live(
 
     trades: list[dict] = []
     BATCH = 3   # pages fetched concurrently
-    MAX_PAGES = 30
+    MAX_PAGES = max_pages
     # How far back the fetch actually reached. The page cap is hit long before
     # 30 days for an active account — 3,000 log entries covered just 1.8h for a
     # market maker — so the windows below must report their real coverage
@@ -287,6 +305,8 @@ async def account_flow_live(
         "truncated": not reached_cutoff,   # hit the page cap before 30d
         "max_pages": MAX_PAGES,
     }
+    _acctflow_cache[cache_key] = result
+    _acctflow_cache_ts[cache_key] = now
     return result
 
 

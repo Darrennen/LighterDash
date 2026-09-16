@@ -981,6 +981,9 @@ $('#histNextBtn').addEventListener('click', () => loadHistory(_histOffset + HIST
 // ── LIT flow overview ─────────────────────────────────────────
 
 let _flowMarket = '';
+// Bumped on every load so a slow deep crawl from a previous account cannot
+// overwrite the current one's cards.
+let _flowToken = 0;
 let _flowData = null;
 
 $$('[data-flow-market]').forEach(b => {
@@ -1002,8 +1005,22 @@ async function loadLitFlow(accountId) {
   try {
     const mq = _flowMarket ? `&market_id=${_flowMarket}` : '';
     const addrQ = _histAddress ? `&address=${encodeURIComponent(_histAddress)}` : '';
-    _flowData = await fetch(`/api/lit/account-flow-live?account_id=${accountId}${addrQ}${mq}`)
-      .then(r => r.ok ? r.json() : Promise.reject(r.status));
+    const url = d => `/api/lit/account-flow-live?account_id=${accountId}${addrQ}${mq}&max_pages=${d}`;
+    const get = d => fetch(url(d)).then(r => r.ok ? r.json() : Promise.reject(r.status));
+
+    // Shallow pass first: a few pages cover recent activity, so the cards
+    // paint in ~2s instead of ~15s. The full crawl then refines the longer
+    // windows in place. Each card already states the range it covers, so the
+    // shallow numbers are labelled honestly while the deep pass runs.
+    const token = ++_flowToken;
+    _flowData = await get(4);
+    if (token !== _flowToken) return;        // a newer lookup superseded this
+    renderLitFlow(_flowData);
+    if (msg) msg.textContent = 'loading full history…';
+
+    const deep = await get(30);
+    if (token !== _flowToken) return;
+    _flowData = deep;
     renderLitFlow(_flowData);
     if (msg) msg.textContent = '';
   } catch (e) {
