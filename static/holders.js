@@ -4,6 +4,7 @@
    ───────────────────────────────────────────────────────────── */
 
 const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
 
 // ── formatters (copied verbatim from traders.js for consistency) ───
 const fmtUsd = n => {
@@ -73,6 +74,13 @@ function tierPill(tier, label) {
 // burned LIT belongs to nobody.
 let _litPrice = 0;
 
+// Two genuinely different populations, not one list with a flag:
+//   outside — L1 addresses holding LIT on Ethereum, no Lighter account needed
+//   inside  — accounts holding LIT inside Lighter L2
+// The bridge is the seam: its L1 balance IS the whole L2 float.
+let _side = 'outside';
+let _l1 = null, _l2 = null;
+
 function renderStats(l1) {
   if (!l1 || !l1.count) return;
   const supply = Number(l1.meta.total_supply || 0);
@@ -98,16 +106,24 @@ function renderStats(l1) {
 
 // ── Top LIT Holders table ───────────────────────────────────
 function renderHolders(l1) {
+  if (_side === 'inside') return renderInsideTable();
   const tbody = $('#holdersBody');
-  const holders = l1?.holders || [];
+  // "Not in Lighter" excludes the bridge: its balance is the L2 float, so
+  // counting it on the outside side would double-count the inside one.
+  const all = l1?.holders || [];
+  const holders = _side === 'outside' ? all.filter(h => h.kind !== 'bridge') : all;
   const asOf = l1?.meta?.snapshot_ts
     ? new Date(Number(l1.meta.snapshot_ts) * 1000).toLocaleString('en-MY',
         { timeZone: 'Asia/Kuala_Lumpur', hour12: false,
           month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '';
+  const bridge = (l1?.kinds || []).find(k => k.kind === 'bridge');
   $('#holdersCaption').innerHTML = l1?.count
-    ? `every address holding LIT on Ethereum · ${fmtNum(l1.count)} total, `
-      + `${Number(l1.meta.accounted_pct).toFixed(2)}% of the 1B supply accounted`
+    ? (_side === 'outside'
+        ? `LIT held OUTSIDE Lighter — ${fmtNum(l1.count - 1)} Ethereum addresses, `
+          + `${fmtLit((l1.total_lit || 0) - (bridge?.lit || 0))} LIT`
+        : `every address holding LIT on Ethereum · ${fmtNum(l1.count)} total, `
+          + `${Number(l1.meta.accounted_pct).toFixed(2)}% of the 1B supply accounted`)
       + (asOf ? ` · as of ${asOf}` : '')
     : '';
 
@@ -136,23 +152,43 @@ function renderHolders(l1) {
     </tr>`).join('');
 }
 
-// ── L2 sample, demoted ───────────────────────────────────────────────
-function renderL2(d) {
-  const tbody = $('#l2Body');
-  const rows = d?.holders || [];
-  $('#l2Caption').textContent = d
-    ? `${fmtNum(d.holders_count)} accounts ≥100K LIT among ${fmtNum(d.accounts_scanned)} scanned — a sample of accounts observed trading, not the L2 total`
-    : 'unavailable';
+// ── inside-Lighter view ──────────────────────────────────────────────
+// Deliberately honest about its own incompleteness: the bridge holds the whole
+// L2 float, but we can only see accounts we have scanned, which is a fraction.
+function renderInsideTable() {
+  const tbody = $('#holdersBody');
+  const rows = _l2?.holders || [];
+  const bridge = (_l1?.kinds || []).find(k => k.kind === 'bridge');
+  const float = bridge?.lit || 0;
+  const seen = rows.reduce((a, h) => a + (h.balance_lit || 0), 0);
+
+  $('#holdersCaption').innerHTML = float
+    ? `LIT held INSIDE Lighter — ${fmtLit(float)} LIT sits in the L1 bridge, `
+      + `of which we can see <b>${fmtLit(seen)}</b> across ${fmtNum(rows.length)} scanned accounts `
+      + `(${(seen / float * 100).toFixed(1)}% — only accounts observed trading are scanned)`
+    : 'LIT held inside Lighter';
+
   tbody.innerHTML = rows.length
     ? rows.map((h, i) => `<tr>
         <td class="rank">${i + 1}</td>
-        <td>${acctCell(h.account_index)}</td>
+        <td class="acct" style="font-size:11px"><a href="/explorer?q=${h.account_index}" style="color:var(--ink);text-decoration:none;border-bottom:1px solid var(--line-2)">#${h.account_index}</a></td>
         <td class="num">${fmtLit(h.balance_lit)}</td>
-        <td class="num">${h.usd != null ? fmtUsd(h.usd) : '—'}</td>
+        <td class="num">${h.usd != null ? fmtUsd(h.usd) : (_litPrice ? fmtUsd(h.balance_lit * _litPrice) : '—')}</td>
+        <td class="num">${float ? (h.balance_lit / float * 100).toFixed(3) + '%' : '—'}</td>
         <td>${tierPill(h.tier, TIER_LABEL[h.tier])}</td>
       </tr>`).join('')
-    : `<tr><td colspan="5" class="empty">no tracked L2 holders</td></tr>`;
+    : `<tr><td colspan="6" class="empty">no scanned Lighter accounts hold LIT</td></tr>`;
 }
+
+$$('[data-side]').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('[data-side]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    _side = b.dataset.side;
+    renderHolders(_l1);
+  });
+});
+
 
 // ── Tier Breakdown table ─────────────────────────────────────
 function renderTiers(l1) {
@@ -221,11 +257,11 @@ async function refreshAll() {
   $('#lastSync').textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
 
   _litPrice = Number(l2?.lit_price || 0);
+  _l1 = l1; _l2 = l2;
   renderStats(l1);
   renderHolders(l1);
   renderTiers(l1);
   drawPyramid(l1);
-  renderL2(l2);
 }
 
 // ── boot ─────────────────────────────────────────────────────

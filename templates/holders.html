@@ -64,7 +64,12 @@
   <!-- Top LIT Holders -->
   <section class="card span-12">
     <div class="card-head">
-      <span class="card-title">Every LIT Holder <span class="count" id="holdersCaption"></span></span>
+      <span class="card-title">LIT Holders <span class="count" id="holdersCaption"></span></span>
+      <div class="tools" id="holderSideBtns">
+        <button class="btn-sm active" data-side="outside">Not in Lighter</button>
+        <button class="btn-sm" data-side="inside">In Lighter</button>
+        <button class="btn-sm" data-side="all">All L1</button>
+      </div>
     </div>
     <div id="holdersTableWrap" style="overflow-x:auto">
       <table id="holdersTable">
@@ -84,20 +89,6 @@
   </section>
 
   <!-- Tier Breakdown -->
-  <!-- The L2 sample, demoted: it answers a different question (who holds LIT
-       inside Lighter) and covers only accounts observed trading. -->
-  <section class="card span-12">
-    <div class="card-head">
-      <span class="card-title">On Lighter L2 <span class="count" id="l2Caption">tracked trading accounts only</span></span>
-    </div>
-    <div style="overflow-x:auto">
-      <table id="l2Table">
-        <thead><tr><th>#</th><th>Account</th><th class="num">Balance (LIT)</th><th class="num">USD</th><th>Tier</th></tr></thead>
-        <tbody id="l2Body"><tr><td colspan="5" class="empty">loading…</td></tr></tbody>
-      </table>
-    </div>
-  </section>
-
   <section class="card span-6">
     <div class="card-head">
       <span class="card-title">Tier Breakdown <span class="count">now · no history</span></span>
@@ -137,6 +128,6 @@
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/holders.js?v=20260917d"></script>
+<script type="module" src="/static/holders.js?v=20260917f"></script>
 </body>
 </html>
