@@ -6,6 +6,16 @@
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 
+// Net LIT moved in the window. Dormant is its own state, not zero-with-a-dash:
+// 20 of the top 25 holders have not moved a single LIT in 30 days, and that
+// stillness is the finding.
+function flowCell(v) {
+  if (v == null) return '<td class="num">—</td>';
+  if (Math.abs(v) < 1) return '<td class="num" style="color:var(--ink-faint)">dormant</td>';
+  const up = v > 0;
+  return `<td class="num" style="color:${up ? 'var(--green)' : 'var(--red)'}">${up ? '+' : '−'}${fmtLit(Math.abs(v))}</td>`;
+}
+
 // ── formatters (copied verbatim from traders.js for consistency) ───
 const fmtUsd = n => {
   if (n == null || isNaN(n)) return '—';
@@ -128,11 +138,11 @@ function renderHolders(l1) {
     : '';
 
   if (!l1) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty">holder set unavailable</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">holder set unavailable</td></tr>`;
     return;
   }
   if (!holders.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty">holder set not loaded — run scripts/load_lit_holders.py</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">holder set not loaded — run scripts/load_lit_holders.py</td></tr>`;
     return;
   }
 
@@ -148,6 +158,7 @@ function renderHolders(l1) {
       <td class="num">${fmtLit(h.lit)}</td>
       <td class="num">${_litPrice ? fmtUsd(h.lit * _litPrice) : '—'}</td>
       <td class="num">${h.pct_supply != null ? h.pct_supply.toFixed(3) + '%' : '—'}</td>
+      ${flowCell(h.net_30d)}
       <td>${KIND[h.kind] || ''}</td>
     </tr>`).join('');
 }
@@ -175,9 +186,10 @@ function renderInsideTable() {
         <td class="num">${fmtLit(h.balance_lit)}</td>
         <td class="num">${h.usd != null ? fmtUsd(h.usd) : (_litPrice ? fmtUsd(h.balance_lit * _litPrice) : '—')}</td>
         <td class="num">${float ? (h.balance_lit / float * 100).toFixed(3) + '%' : '—'}</td>
+        <td class="num" style="color:var(--ink-faint)">—</td>
         <td>${tierPill(h.tier, TIER_LABEL[h.tier])}</td>
       </tr>`).join('')
-    : `<tr><td colspan="6" class="empty">no scanned Lighter accounts hold LIT</td></tr>`;
+    : `<tr><td colspan="7" class="empty">no scanned Lighter accounts hold LIT</td></tr>`;
 }
 
 $$('[data-side]').forEach(b => {

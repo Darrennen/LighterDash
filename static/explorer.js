@@ -1221,6 +1221,13 @@ function renderL1Card(d) {
           <span style="color:var(--ink-faint);font-size:12px">of ${Number(d.total_holders).toLocaleString()}</span></div></div>
       <div><div class="card-lbl">Share of supply</div>
         <div style="font-family:var(--font-mono);font-size:16px">${d.pct_supply != null ? d.pct_supply.toFixed(4) + '%' : '—'}</div></div>
+      ${[['24h', d.net_24h], ['7d', d.net_7d], ['30d', d.net_30d]].map(([lbl, v]) => `
+        <div><div class="card-lbl">${lbl} flow</div>
+          <div style="font-family:var(--font-mono);font-size:16px;color:${
+            v == null ? 'var(--ink-faint)' : Math.abs(v) < 1 ? 'var(--ink-faint)'
+              : v > 0 ? 'var(--green)' : 'var(--red)'}">${
+            v == null ? '—' : Math.abs(v) < 1 ? 'dormant'
+              : (v > 0 ? '+' : '−') + Number(Math.abs(v)).toLocaleString('en-US', { maximumFractionDigits: 0 })}</div></div>`).join('')}
     </div>
     <div style="margin-top:10px;font-size:11px;color:var(--ink-dim)">
       ${KIND[d.kind] || 'Holds LIT on Ethereum L1 and has never opened a Lighter account, so there is no trading history to show.'}

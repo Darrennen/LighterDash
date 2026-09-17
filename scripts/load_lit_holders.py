@@ -7,7 +7,7 @@ which validates by summing to the whole 1,000,000,000 supply.
 
     python3 scripts/load_lit_holders.py LIT_holders_L1_2026-09-17.csv
 
-CSV columns: rank,address,lit,kind,entity,category
+CSV columns: rank,address,lit,kind,entity,category,net_24h,net_7d,net_30d
 
 Refresh: re-run Dune query 8749098, export CSV, re-run this. The loader
 replaces the table wholesale — a holder set merged from two dates would mix
@@ -62,7 +62,9 @@ def main(csv_path: str) -> None:
                 kind = (r.get("kind") or "wallet").strip() or "wallet"
                 entity, cat = (r.get("entity") or "").strip(), (r.get("category") or "").strip()
                 label = f"{entity} · {cat}" if entity and cat else entity
-            rows.append((addr, float(r["lit"]), int(r["rank"]), kind, label))
+            rows.append((addr, float(r["lit"]), int(r["rank"]), kind, label,
+                         float(r.get("net_24h") or 0), float(r.get("net_7d") or 0),
+                         float(r.get("net_30d") or 0)))
 
     if not rows:
         raise SystemExit("no rows parsed — wrong CSV?")
@@ -84,9 +86,16 @@ def main(csv_path: str) -> None:
            CREATE INDEX IF NOT EXISTS idx_lit_l1_rank ON lit_l1_holders (rank ASC);
            CREATE TABLE IF NOT EXISTS lit_l1_meta (k TEXT PRIMARY KEY, v TEXT);"""
     )
+    for col in ("net_24h", "net_7d", "net_30d"):
+        try:
+            db.execute(f"ALTER TABLE lit_l1_holders ADD COLUMN {col} REAL")
+        except sqlite3.OperationalError:
+            pass  # already present
     db.execute("DELETE FROM lit_l1_holders")
     db.executemany(
-        "INSERT INTO lit_l1_holders (address, lit, rank, kind, label) VALUES (?,?,?,?,?)",
+        """INSERT INTO lit_l1_holders
+           (address, lit, rank, kind, label, net_24h, net_7d, net_30d)
+           VALUES (?,?,?,?,?,?,?,?)""",
         rows,
     )
     for k, v in {

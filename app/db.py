@@ -145,6 +145,11 @@ _MIGRATIONS = [
     ("lit_fundamentals", "volume_usd", "REAL"),
     ("lit_fundamentals", "trades",     "INTEGER"),
     ("lit_fundamentals", "markets",    "INTEGER"),
+    # Net LIT flow per holder. A balance says who owns it; flow says who is
+    # accumulating or leaving, which is the question a holder list raises.
+    ("lit_l1_holders", "net_24h", "REAL"),
+    ("lit_l1_holders", "net_7d",  "REAL"),
+    ("lit_l1_holders", "net_30d", "REAL"),
 ]
 
 
@@ -884,8 +889,9 @@ async def fetch_lit_l1_holders(limit: int = 100, offset: int = 0) -> dict[str, A
             return {"holders": [], "count": 0, "meta": {}, "tiers": [], "kinds": []}
 
         cur = await db.execute(
-            """SELECT rank, address, lit, kind, label FROM lit_l1_holders
-               ORDER BY rank ASC LIMIT ? OFFSET ?""", (limit, offset))
+            """SELECT rank, address, lit, kind, label, net_24h, net_7d, net_30d
+               FROM lit_l1_holders ORDER BY rank ASC LIMIT ? OFFSET ?""",
+            (limit, offset))
         rows = await cur.fetchall()
 
         cur = await db.execute("SELECT COUNT(*), COALESCE(SUM(lit),0) FROM lit_l1_holders")
@@ -912,8 +918,9 @@ async def fetch_lit_l1_holders(limit: int = 100, offset: int = 0) -> dict[str, A
     return {
         "holders": [
             {"rank": r, "address": a, "lit": l, "kind": k, "label": lb,
+             "net_24h": n24, "net_7d": n7, "net_30d": n30,
              "pct_supply": (l / supply * 100) if supply else None}
-            for r, a, l, k, lb in rows
+            for r, a, l, k, lb, n24, n7, n30 in rows
         ],
         "count": count, "total_lit": total,
         "kinds": kinds, "tiers": tiers, "meta": meta,
@@ -932,7 +939,8 @@ async def fetch_lit_l1_holder(address: str) -> dict[str, Any] | None:
         return None
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute(
-            "SELECT rank, address, lit, kind, label FROM lit_l1_holders WHERE address = ?",
+            """SELECT rank, address, lit, kind, label, net_24h, net_7d, net_30d
+               FROM lit_l1_holders WHERE address = ?""",
             (addr,),
         )
         row = await cur.fetchone()
@@ -945,10 +953,11 @@ async def fetch_lit_l1_holder(address: str) -> dict[str, Any] | None:
         cur = await db.execute("SELECT k, v FROM lit_l1_meta")
         meta = {k: v for k, v in await cur.fetchall()}
 
-    rank, a, lit, kind, label = row
+    rank, a, lit, kind, label, n24, n7, n30 = row
     supply = float(meta.get("total_supply") or 0) or None
     return {
         "address": a, "rank": rank, "lit": lit, "kind": kind, "label": label,
+        "net_24h": n24, "net_7d": n7, "net_30d": n30,
         "pct_supply": (lit / supply * 100) if supply else None,
         "total_holders": total_holders,
         "snapshot_ts": meta.get("snapshot_ts"),
