@@ -1343,25 +1343,29 @@ function drawFundamentals(d) {
     tile('Price', s.price != null ? '$' + s.price.toFixed(3) : '—',
          s.gain_from_low_pct != null ? `+${s.gain_from_low_pct.toFixed(0)}% from $${s.price_low.toFixed(3)} low` : '',
          'var(--green)'),
-    tile('Protocol Fees', s.fees_30d_avg != null ? fmtUsd(s.fees_30d_avg) + '/day' : '—',
-         s.fees_vs_peak_pct != null ? `${s.fees_vs_peak_pct.toFixed(0)}% of peak (${fmtUsd(s.fees_peak_30d_avg)}/day)` : '',
-         s.fees_vs_peak_pct != null && s.fees_vs_peak_pct < 60 ? 'var(--red)' : ''),
+    tile('24h Volume', s.volume_24h != null ? fmtUsd(s.volume_24h) : '—',
+         s.markets ? `${s.markets} markets · all zero-fee` : 'from Lighter exchangeStats'),
     tile('Float', pctFloat != null ? pctFloat.toFixed(0) + '%' : '—',
          sup.circulating ? `${fmtNum(sup.circulating / 1e6, 0)}M of ${fmtNum(sup.total / 1e6, 0)}M circulating` : ''),
-    tile('Mkt Cap / Fees', s.mcap_to_fees != null ? s.mcap_to_fees.toFixed(0) + '×' : '—',
-         sup.market_cap ? fmtUsd(sup.market_cap) + ' cap' : ''),
-    tile('FDV / Fees', s.fdv_to_fees != null ? s.fdv_to_fees.toFixed(0) + '×' : '—',
-         sup.fdv ? fmtUsd(sup.fdv) + ' FDV' : ''),
+    tile('Market Cap', sup.market_cap ? fmtUsd(sup.market_cap) : '—', 'circulating'),
+    tile('FDV', sup.fdv ? fmtUsd(sup.fdv) : '—', 'fully diluted'),
   ].join('');
 
-  // Say the comparison out loud — the chart shows it, the sentence names it.
+  // State the caveat, not a verdict. Every Lighter market is zero-fee, so a
+  // fee multiple describes nothing — and the fee series itself comes from a
+  // source that reports 75x less daily volume than Lighter's own API.
   const bits = [];
-  if (s.gain_from_low_pct != null && s.fees_vs_peak_pct != null) {
-    const dir = s.fees_vs_peak_pct < 100 ? 'fell to' : 'rose to';
-    bits.push(`Price is up ${s.gain_from_low_pct.toFixed(0)}% from its low while protocol fees ${dir} ${s.fees_vs_peak_pct.toFixed(0)}% of their peak — the move is not explained by revenue.`);
+  if (s.zero_fee_exchange) {
+    bits.push(`Lighter charges zero maker and taker fees on all ${s.markets || '246'} markets, so fee revenue is not the business model and price-to-fees describes nothing. Volume is the metric that tracks the exchange.`);
+  }
+  if (s.volume_24h) {
+    bits.push(`Latest: ${fmtUsd(s.volume_24h)} traded in 24h across ${s.markets} markets${s.trades_24h ? ` (${fmtNum(s.trades_24h, 0)} trades)` : ''}.`);
+  }
+  if (s.volume_days != null && s.volume_days < 30) {
+    bits.push(`Volume history is ${s.volume_days} day${s.volume_days === 1 ? '' : 's'} deep — Lighter publishes no historical volume endpoint, so this series builds forward from first snapshot.`);
   }
   if (pctFloat != null && pctFloat < 50) {
-    bits.push(`Only ${pctFloat.toFixed(0)}% of supply circulates, so FDV/fees (${s.fdv_to_fees != null ? s.fdv_to_fees.toFixed(0) + '×' : '—'}) is the figure that survives full dilution.`);
+    bits.push(`Only ${pctFloat.toFixed(0)}% of supply circulates; FDV is ${sup.fdv ? fmtUsd(sup.fdv) : '—'} against a ${sup.market_cap ? fmtUsd(sup.market_cap) : '—'} market cap.`);
   }
   $('#fundNote').textContent = bits.join(' ');
   $('#fundCaption').textContent = `indexed to 100 at ${pts[0].day} · fees smoothed 30d`;

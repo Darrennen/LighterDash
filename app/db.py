@@ -99,9 +99,12 @@ CREATE INDEX IF NOT EXISTS idx_lit_l1_rank ON lit_l1_holders (rank ASC);
 -- Daily price and protocol revenue on one timeline. Answers "did the business
 -- grow with the price?", which nothing in the cockpit could previously address.
 CREATE TABLE IF NOT EXISTS lit_fundamentals (
-    day       TEXT PRIMARY KEY,   -- UTC YYYY-MM-DD
-    price     REAL,
-    fees_usd  REAL
+    day         TEXT PRIMARY KEY,   -- UTC YYYY-MM-DD
+    price       REAL,
+    fees_usd    REAL,
+    volume_usd  REAL,               -- from Lighter's own exchangeStats
+    trades      INTEGER,
+    markets     INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS lit_l1_meta (
@@ -137,6 +140,11 @@ _MIGRATIONS = [
     ("lit_trades", "seller_imf",         "INTEGER"),
     ("lit_trades", "seller_fee",         "INTEGER"),
     ("lit_trades", "seller_client_id",   "INTEGER"),
+    # Volume from Lighter's own exchangeStats. Fees are zero on all 246 markets,
+    # so volume — not revenue — is what tracks the exchange.
+    ("lit_fundamentals", "volume_usd", "REAL"),
+    ("lit_fundamentals", "trades",     "INTEGER"),
+    ("lit_fundamentals", "markets",    "INTEGER"),
 ]
 
 
@@ -963,13 +971,29 @@ async def upsert_fundamentals(rows: list[tuple]) -> int:
     return len(rows)
 
 
+async def upsert_volume(day: str, volume_usd: float, trades: int, markets: int) -> None:
+    """Snapshot Lighter's own reported daily volume. No historical endpoint
+    exists, so the series builds forward from first run."""
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO lit_fundamentals (day, volume_usd, trades, markets)
+               VALUES (?,?,?,?)
+               ON CONFLICT(day) DO UPDATE SET
+                   volume_usd = excluded.volume_usd,
+                   trades     = excluded.trades,
+                   markets    = excluded.markets""",
+            (day, volume_usd, trades, markets))
+        await db.commit()
+
+
 async def fetch_fundamentals_series(days: int = 365) -> list[dict[str, Any]]:
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cur = await db.execute(
-            """SELECT day, price, fees_usd FROM lit_fundamentals
-               ORDER BY day DESC LIMIT ?""", (days,))
+            """SELECT day, price, fees_usd, volume_usd, trades, markets
+               FROM lit_fundamentals ORDER BY day DESC LIMIT ?""", (days,))
         rows = await cur.fetchall()
-    return [{"day": d, "price": p, "fees_usd": f} for d, p, f in reversed(rows)]
+    return [{"day": d, "price": p, "fees_usd": f, "volume_usd": v,
+             "trades": t, "markets": m} for d, p, f, v, t, m in reversed(rows)]
 
 
 async def fetch_meta(key: str) -> str | None:

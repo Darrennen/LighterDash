@@ -6,6 +6,14 @@ old at best), there was no circulating-supply or FDV figure anywhere, and no
 protocol revenue series at all — so the obvious question about any token move,
 "is the business growing?", had no answer on the page.
 
+IMPORTANT — fees are the WRONG fundamental for Lighter. All 246 markets charge
+taker_fee 0.0000 and maker_fee 0.0000 (verified via /orderBooks), so trading
+generates no fee revenue by design and a price-to-fees multiple is meaningless.
+DefiLlama's Lighter series is also unreliable for daily figures: it reports
+~$23M/day against $1.73B/day from Lighter's own exchangeStats, a 75x gap, while
+its cumulative total does match the protocol's own $10B milestone. Volume, taken
+from Lighter directly, is the metric that reflects the business.
+
 Two external sources, both free and keyless:
   - DefiLlama  coins.llama.fi/chart/...  — daily close, full history
   - DefiLlama  /summary/fees/lighter     — daily protocol fees
@@ -28,6 +36,7 @@ import httpx
 
 from app.db import (
     fetch_fundamentals_series,
+    upsert_volume,
     fetch_meta,
     upsert_fundamentals,
     upsert_meta,
@@ -114,6 +123,20 @@ async def refresh(force: bool = False) -> dict[str, Any]:
     except Exception as e:
         log.warning("coingecko supply failed: %s", e)
 
+    # Volume from Lighter itself. There is no historical endpoint, so today's
+    # figure is snapshotted daily and the series builds forward from here —
+    # honest, and better than importing a number that is 75x wrong.
+    try:
+        stats = await _get("https://mainnet.zklighter.elliot.ai/api/v1/exchangeStats")
+        books = stats.get("order_book_stats") or []
+        vol = sum(float(b.get("daily_quote_token_volume") or 0) for b in books)
+        trades = sum(int(b.get("daily_trades_count") or 0) for b in books)
+        if vol > 0:
+            today = time.strftime("%Y-%m-%d", time.gmtime())
+            await upsert_volume(today, vol, trades, len(books))
+    except Exception as e:
+        log.warning("lighter volume snapshot failed: %s", e)
+
     await upsert_meta("fundamentals_refreshed_at", str(time.time()))
     return {"refreshed": True, "days": len(rows)}
 
@@ -147,6 +170,8 @@ async def get_fundamentals(days: int = 365) -> dict[str, Any]:
         fees_peak30 = max(windows) if windows else None
 
     annualised = fees_30 * 365 if fees_30 else None
+    vols = [r for r in series if r.get("volume_usd")]
+    latest_vol = vols[-1]["volume_usd"] if vols else None
     return {
         "series": series,
         "supply": supply,
@@ -160,6 +185,12 @@ async def get_fundamentals(days: int = 365) -> dict[str, Any]:
             "fees_vs_peak_pct": (fees_30 / fees_peak30 * 100)
                                 if fees_30 and fees_peak30 else None,
             "annualised_fees": annualised,
+            "volume_24h": latest_vol,
+            "volume_days": len(vols),
+            "markets": vols[-1].get("markets") if vols else None,
+            "trades_24h": vols[-1].get("trades") if vols else None,
+            # Every market is zero-fee, so a fee multiple describes nothing.
+            "zero_fee_exchange": True,
             # Price-to-fees on both market cap and FDV: with a low float these
             # differ by 4x and only quoting one of them flatters the token.
             "mcap_to_fees": (supply.get("market_cap") / annualised)
