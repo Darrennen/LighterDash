@@ -31,7 +31,7 @@ from app.services.collector import (
     collect_once,
 )
 from app.services.lighter_client import client
-from app.services import ws_collector
+from app.services import fundamentals, ws_collector
 from app.services.store import store
 
 router = APIRouter()
@@ -390,6 +390,17 @@ async def positions(
     return await fetch_lit_positions(
         market_id=market_id, limit=limit, max_age_hours=max_age_hours
     )
+
+
+@router.get("/fundamentals")
+async def lit_fundamentals(days: int = Query(365, ge=30, le=2000)):
+    """LIT price against Lighter's protocol revenue, plus supply.
+
+    The page could show the last few hours of LIT trading but nothing about
+    whether the business behind it is growing — which is the first question
+    any price move raises.
+    """
+    return await fundamentals.get_fundamentals(days=days)
 
 
 @router.get("/leaders")

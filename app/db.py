@@ -96,6 +96,14 @@ CREATE INDEX IF NOT EXISTS idx_lit_l1_rank ON lit_l1_holders (rank ASC);
 
 -- Snapshot provenance. A holder table with no as-of date gets trusted after it
 -- stops being true.
+-- Daily price and protocol revenue on one timeline. Answers "did the business
+-- grow with the price?", which nothing in the cockpit could previously address.
+CREATE TABLE IF NOT EXISTS lit_fundamentals (
+    day       TEXT PRIMARY KEY,   -- UTC YYYY-MM-DD
+    price     REAL,
+    fees_usd  REAL
+);
+
 CREATE TABLE IF NOT EXISTS lit_l1_meta (
     k TEXT PRIMARY KEY,
     v TEXT
@@ -937,6 +945,45 @@ async def fetch_lit_l1_holder(address: str) -> dict[str, Any] | None:
         "total_holders": total_holders,
         "snapshot_ts": meta.get("snapshot_ts"),
     }
+
+
+async def upsert_fundamentals(rows: list[tuple]) -> int:
+    """Merge daily price/fees. COALESCE keeps a value when one source lags."""
+    if not rows:
+        return 0
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.executemany(
+            """INSERT INTO lit_fundamentals (day, price, fees_usd) VALUES (?,?,?)
+               ON CONFLICT(day) DO UPDATE SET
+                   price    = COALESCE(excluded.price,    lit_fundamentals.price),
+                   fees_usd = COALESCE(excluded.fees_usd, lit_fundamentals.fees_usd)""",
+            rows,
+        )
+        await db.commit()
+    return len(rows)
+
+
+async def fetch_fundamentals_series(days: int = 365) -> list[dict[str, Any]]:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute(
+            """SELECT day, price, fees_usd FROM lit_fundamentals
+               ORDER BY day DESC LIMIT ?""", (days,))
+        rows = await cur.fetchall()
+    return [{"day": d, "price": p, "fees_usd": f} for d, p, f in reversed(rows)]
+
+
+async def fetch_meta(key: str) -> str | None:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        cur = await db.execute("SELECT v FROM lit_l1_meta WHERE k = ?", (key,))
+        row = await cur.fetchone()
+    return row[0] if row else None
+
+
+async def upsert_meta(key: str, value: str) -> None:
+    async with aiosqlite.connect(settings.DB_PATH) as db:
+        await db.execute("INSERT OR REPLACE INTO lit_l1_meta (k, v) VALUES (?, ?)",
+                         (key, value))
+        await db.commit()
 
 
 async def fetch_lit_stats() -> dict[str, Any]:

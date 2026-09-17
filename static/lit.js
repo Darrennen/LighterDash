@@ -1264,3 +1264,116 @@ setInterval(pollBackfillStatus, 15_000);
 setInterval(refreshTracked, 120_000); // tracked wallets refresh every 2 min
 setInterval(pollRelPerf, 60_000);
 setInterval(pollVolVenue, 60_000);
+
+// ── Fundamentals: price against the revenue of the thing it represents ──
+// A token can rally while the protocol behind it shrinks. That divergence is
+// the first thing to check on any move, and the page had no way to see it.
+let _fundDays = 365;
+
+async function pollFundamentals() {
+  try {
+    const d = await apiGet(`/api/lit/fundamentals?days=${_fundDays}`);
+    drawFundamentals(d);
+  } catch (e) {
+    console.warn('fundamentals failed:', e.message);
+  }
+}
+
+function drawFundamentals(d) {
+  const el = $('#fundChart');
+  if (!el || !d) return;
+  const rows = d.series || [];
+  const s = d.summary || {}, sup = d.supply || {};
+
+  // Fees are spiky day to day; the comparison is trend against trend.
+  const fees = [];
+  let win = [];
+  for (const r of rows) {
+    if (r.fees_usd != null) { win.push(r.fees_usd); if (win.length > 30) win.shift(); }
+    fees.push(win.length ? win.reduce((a, b) => a + b, 0) / win.length : null);
+  }
+
+  const pts = rows.map((r, i) => ({ day: r.day, price: r.price, fee: fees[i] }))
+                  .filter(p => p.price != null || p.fee != null);
+  if (pts.length < 2) {
+    el.innerHTML = '<div style="color:var(--ink-faint);font-size:11px;padding:12px 0">not enough history yet</div>';
+    return;
+  }
+
+  const base = k => { const v = pts.find(p => p[k] != null); return v ? v[k] : null; };
+  const bP = base('price'), bF = base('fee');
+  const idx = (v, b) => (v != null && b) ? v / b * 100 : null;
+  const vals = pts.flatMap(p => [idx(p.price, bP), idx(p.fee, bF)]).filter(v => v != null);
+  const maxV = Math.max(...vals), minV = Math.min(...vals), range = (maxV - minV) || 1;
+
+  const W = 800, H = 190, pad = { l: 4, r: 46, t: 8, b: 4 };
+  const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+  const px = i => pad.l + (i / (pts.length - 1)) * cw;
+  const py = v => pad.t + ((maxV - v) / range) * ch;
+
+  const line = (k, b, color) => {
+    let out = '', open = false;
+    pts.forEach((p, i) => {
+      const v = idx(p[k], b);
+      if (v == null) { open = false; return; }
+      out += `${open ? 'L' : 'M'} ${px(i).toFixed(1)},${py(v).toFixed(1)} `;
+      open = true;
+    });
+    return `<path d="${out}" fill="none" stroke="${color}" stroke-width="1.6"/>`;
+  };
+  const grid = [0, .25, .5, .75, 1].map(f => {
+    const v = minV + range * f, y = py(v);
+    return `<line x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}" stroke="var(--line)"/>
+      <text x="${W - pad.r + 4}" y="${(y + 3).toFixed(1)}" fill="var(--ink-faint)" font-size="9" font-family="monospace">${v.toFixed(0)}</text>`;
+  }).join('');
+
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block;overflow:visible">
+    ${grid}${line('fee', bF, 'var(--amber)')}${line('price', bP, 'var(--accent)')}
+  </svg>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);margin-top:4px">
+    <span>${pts[0].day}</span><span>${pts[pts.length - 1].day}</span></div>`;
+
+  const tile = (lbl, val, sub, cls) => `<div>
+    <div class="section-lbl">${lbl}</div>
+    <div style="font-family:var(--font-mono);font-size:17px;font-weight:600${cls ? `;color:${cls}` : ''}">${val}</div>
+    ${sub ? `<div style="font-size:10px;color:var(--ink-faint);margin-top:2px">${sub}</div>` : ''}</div>`;
+
+  const pctFloat = sup.circulating && sup.total ? (sup.circulating / sup.total * 100) : null;
+  $('#fundStats').innerHTML = [
+    tile('Price', s.price != null ? '$' + s.price.toFixed(3) : '—',
+         s.gain_from_low_pct != null ? `+${s.gain_from_low_pct.toFixed(0)}% from $${s.price_low.toFixed(3)} low` : '',
+         'var(--green)'),
+    tile('Protocol Fees', s.fees_30d_avg != null ? fmtUsd(s.fees_30d_avg) + '/day' : '—',
+         s.fees_vs_peak_pct != null ? `${s.fees_vs_peak_pct.toFixed(0)}% of peak (${fmtUsd(s.fees_peak_30d_avg)}/day)` : '',
+         s.fees_vs_peak_pct != null && s.fees_vs_peak_pct < 60 ? 'var(--red)' : ''),
+    tile('Float', pctFloat != null ? pctFloat.toFixed(0) + '%' : '—',
+         sup.circulating ? `${fmtNum(sup.circulating / 1e6, 0)}M of ${fmtNum(sup.total / 1e6, 0)}M circulating` : ''),
+    tile('Mkt Cap / Fees', s.mcap_to_fees != null ? s.mcap_to_fees.toFixed(0) + '×' : '—',
+         sup.market_cap ? fmtUsd(sup.market_cap) + ' cap' : ''),
+    tile('FDV / Fees', s.fdv_to_fees != null ? s.fdv_to_fees.toFixed(0) + '×' : '—',
+         sup.fdv ? fmtUsd(sup.fdv) + ' FDV' : ''),
+  ].join('');
+
+  // Say the comparison out loud — the chart shows it, the sentence names it.
+  const bits = [];
+  if (s.gain_from_low_pct != null && s.fees_vs_peak_pct != null) {
+    const dir = s.fees_vs_peak_pct < 100 ? 'fell to' : 'rose to';
+    bits.push(`Price is up ${s.gain_from_low_pct.toFixed(0)}% from its low while protocol fees ${dir} ${s.fees_vs_peak_pct.toFixed(0)}% of their peak — the move is not explained by revenue.`);
+  }
+  if (pctFloat != null && pctFloat < 50) {
+    bits.push(`Only ${pctFloat.toFixed(0)}% of supply circulates, so FDV/fees (${s.fdv_to_fees != null ? s.fdv_to_fees.toFixed(0) + '×' : '—'}) is the figure that survives full dilution.`);
+  }
+  $('#fundNote').textContent = bits.join(' ');
+  $('#fundCaption').textContent = `indexed to 100 at ${pts[0].day} · fees smoothed 30d`;
+}
+
+$$('[data-fund-days]').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('[data-fund-days]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    _fundDays = Number(b.dataset.fundDays);
+    pollFundamentals();
+  });
+});
+
+pollFundamentals();

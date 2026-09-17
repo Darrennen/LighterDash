@@ -273,6 +273,27 @@
     </div>
   </section>
 
+  <!-- Fundamentals: does the business explain the price? -->
+  <section class="card span-12">
+    <div class="card-head">
+      <span class="card-title">Price vs Protocol Revenue <span class="count" id="fundCaption">indexed to 100 · does the business explain the move?</span></span>
+      <div class="tools">
+        <button class="btn-sm" data-fund-days="180">6m</button>
+        <button class="btn-sm active" data-fund-days="365">1y</button>
+        <button class="btn-sm" data-fund-days="500">max</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;font-size:10px;margin-bottom:6px;flex-wrap:wrap">
+      <span style="color:var(--accent)">● LIT price</span>
+      <span style="color:var(--amber)">● Protocol fees (30d avg)</span>
+    </div>
+    <div id="fundChart" style="width:100%;height:190px;position:relative">
+      <div style="color:var(--ink-faint);font-size:11px;padding:12px 0">loading…</div>
+    </div>
+    <div id="fundStats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"></div>
+    <div id="fundNote" style="margin-top:10px;font-size:11px;color:var(--ink-dim);line-height:1.5"></div>
+  </section>
+
   <!-- Relative Performance -->
   <section class="card span-6">
     <div class="card-head">
@@ -417,6 +438,6 @@
   <span>made by <a href="https://x.com/Darrenyap488378" target="_blank" style="color:var(--ink-dim)">Darren</a></span>
 </footer>
 
-<script type="module" src="/static/lit.js?v=20260915b"></script>
+<script type="module" src="/static/lit.js?v=20260917a"></script>
 </body>
 </html>
